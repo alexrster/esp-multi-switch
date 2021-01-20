@@ -1,0 +1,75 @@
+#include <Wire.h>
+#include <hd44780.h>                       // main hd44780 header
+#include <hd44780ioClass/hd44780_I2Cexp.h> // i2c LCD i/o class header
+
+hd44780_I2Cexp lcd(0x27, I2Cexp_PCF8574, 0,1,2,4,5,6,7,3,HIGH); // with rw support
+
+// LCD geometry
+const int LCD_COLS = 16;
+const int LCD_ROWS = 2;
+
+void setup()
+{
+// int status;
+
+// 	// initialize LCD with number of columns and rows: 
+// 	// hd44780 returns a status from begin() that can be used
+// 	// to determine if initalization failed.
+// 	// the actual status codes are defined in <hd44780.h>
+// 	// See the values RV_XXXX
+// 	//
+// 	// looking at the return status from begin() is optional
+// 	// it is being done here to provide feedback should there be an issue
+// 	//
+// 	status = lcd.begin(LCD_COLS, LCD_ROWS);
+// 	if(status) // non zero status means it was unsuccesful
+// 	{
+//     log_d("lcd.begin failed with the code: %d", status);
+// 		// hd44780 has a fatalError() routine that blinks an led if possible
+// 		// begin() failed so call fatalError() with the error code.
+// 		hd44780::fatalError(status); // does not return
+// 	}
+
+//   log_d("lcd.begin ok");
+// 	// Print a message to the LCD
+// 	lcd.print(" UpTime");
+
+//   log_d("lcd.print ok");
+//   log_d("lcd.status: %d", lcd.status());
+// 	if(LCD_ROWS < 2)
+// 		delay(3000);
+}
+
+uint8_t i2cAddr = 0x10;
+void loop()
+{
+	int status;
+	log_d("Try lcd at addr: %02X", ++i2cAddr);
+	hd44780_I2Cexp lcd(i2cAddr);
+
+	status = lcd.begin(LCD_COLS, LCD_ROWS);
+	if(status) // non zero status means it was unsuccesful
+	{
+    log_d("lcd.begin failed with the code: %d", status);
+		// hd44780 has a fatalError() routine that blinks an led if possible
+		// begin() failed so call fatalError() with the error code.
+		// hd44780::fatalError(status); // does not return
+		delay(1000);
+		return;
+	}
+
+	status = lcd.setCursor(0, 1);
+	if(status) // non zero status means it was unsuccesful
+	{
+		log_d("lcd.setCursor failed with the code: %d", status);
+		// setCursor() failed so call fatalError() with the error code.
+		// hd44780::fatalError(status); // does not return
+		delay(1000);
+		return;
+	}
+
+	lcd.print(" HELLO WORLD!!!");
+  log_d("lcd.print ok");
+
+	delay(3000);
+}
