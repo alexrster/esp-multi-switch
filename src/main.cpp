@@ -4,6 +4,8 @@
 #include <ArduinoOTA.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
+#include <FS.h>
+#include <SPIFFS.h>
 #include "version.h"
 
 #define LCD_SDA                       21
@@ -60,6 +62,8 @@
 #define MQTT_STATUS_ONLINE_MSG        "online"
 #define MQTT_STATUS_OFFLINE_MSG       "offline"
 
+#define SWITCH_STATE_FILENAME "/state.bin"
+
 typedef enum SwitchState : uint8_t { 
   On = 0,  // inversed logic on solid state relays board I own
   Off = 1 
@@ -87,15 +91,15 @@ unsigned long
   lastPubSubReconnectAttempt = 0,
   lastUptimeUpdate = 0;
 
-int switchUpdateFlags = 0;
+bool 
+  needPublishCurrentState = true,
+  spiffsEnabled = true;
 
 WiFiClient wifiClient;
 PubSubClient pubSubClient(wifiClient);
-SwitchState_t switchState[SWITCH_RELAY_COUNT];
+SwitchState_t switchRelayState[SWITCH_RELAY_COUNT] = { Off, Off, Off, Off };
 // LiquidCrystal_I2C lcd(0x27); // 0x3F ??? 0x27 -- seems to able to control it at least
 // LiquidCrystal_I2C lcd(0x3F); // 0x3F ??? 0x27 -- seems to able to control it at least
-
-void onMqttMessage(char* topic, byte* payload, unsigned int length);
 
 bool reconnectPubSub() {
   if (now - lastPubSubReconnectAttempt > MQTT_RECONNECT_MILLIS) {
@@ -134,22 +138,91 @@ bool wifiLoop() {
   return true;
 }
 
-void setSwitch(uint8_t switchId, SwitchState_t newSwitchState) {
+void saveSwitchState() {
+  if (!spiffsEnabled) 
+    return;
+
+  auto f = SPIFFS.open(SWITCH_STATE_FILENAME, FILE_WRITE);
+  for (uint8_t i = 0; i < SWITCH_RELAY_COUNT; i++) {
+    f.write(switchRelayState[i] == On ? '1' : '0');
+  }
+  f.close();
+}
+
+void setSwitchState(uint8_t switchId, SwitchState_t newSwitchState, bool saveState = true) {
   log_i("Set switch %d to %s, pin%d=%d", switchId, newSwitchState == On ? "ON" : "OFF", SwitchRelayPin[switchId], (uint8_t)newSwitchState);
   digitalWrite(SwitchRelayPin[switchId], (uint8_t)newSwitchState);
-  switchState[switchId] = newSwitchState;
-  // switchUpdateFlags += pow(2, switchId);
+  switchRelayState[switchId] = newSwitchState;
+
+  if (saveState)
+    saveSwitchState();
+}
+
+void handleSwitchControlMessage(uint8_t switchId, byte* payload, unsigned int length) {
+  switch (length) {
+    case 1: 
+      switch (payload[0]) {
+        case '1': setSwitchState(switchId, On); return;
+        case '0': setSwitchState(switchId, Off); return;
+        default: return;
+      }
+      break;
+    case 2:
+    case 3:
+      switch (payload[1]) {
+        case 'n': setSwitchState(switchId, On); return;
+        case 'f': setSwitchState(switchId, Off); return;
+      }
+      break;
+    case 4: setSwitchState(switchId, On); return;
+    case 5: setSwitchState(switchId, Off); return;
+    default: return;
+  }  
+}
+
+void onMqttMessage(char* topic, byte* payload, unsigned int length) {
+  if (length == 0) return;
+  log_d("Handle message from '%s':\n%s", topic, (char*)payload);
+
+  String topicStr = topic;
+  for (uint8_t i = 0; i < SWITCH_RELAY_COUNT; i++) {
+    if (PubSubSwitchTopic[i] == topicStr) {
+      handleSwitchControlMessage(i, payload, length);
+      return;
+    }
+  }
+  
+  if (PubSubRestartControlTopic == topicStr) {
+    ESP.restart();
+  }
 }
 
 void setup() {
   // lcd.begin(16, 2);
   // lcd.backlight();
   // lcd.home();
-  // lcd.print("MULTI SOCKET 01 ");  
+  // lcd.print(WIFI_HOSTNAME);  
+
+  if(spiffsEnabled && !SPIFFS.begin(true)){
+    log_e("SPIFFS mount failed");
+    spiffsEnabled = false;
+  }
+
+  if (spiffsEnabled && SPIFFS.exists("/state.bin")) {
+    char b[SWITCH_RELAY_COUNT];
+    auto f = SPIFFS.open("/state.bin");
+    f.readBytes(b, SWITCH_RELAY_COUNT);
+
+    for (uint8_t i = 0; i < SWITCH_RELAY_COUNT; i++) {
+      switchRelayState[i] = b[i] == '1' ? On : Off;
+    }
+
+    f.close();
+  }
 
   for (uint8_t i = 0; i < SWITCH_RELAY_COUNT; i++) {
-    pinMode(SwitchRelayPin[i], OUTPUT_OPEN_DRAIN);
-    setSwitch(i, Off);
+    pinMode(SwitchRelayPin[i], OUTPUT);
+    setSwitchState(i, switchRelayState[i], false);
   }
 
   WiFi.setHostname(WIFI_HOSTNAME);
@@ -172,19 +245,20 @@ void setup() {
 void loop() {
   now = millis();
 
-  if (wifiLoop()) {
-    pubSubClientLoop();
-    ArduinoOTA.handle();
+  if (!wifiLoop())
+    return;
+
+  pubSubClientLoop();
+
+  if (needPublishCurrentState) {
+    needPublishCurrentState = false;
+
+    for (uint8_t i = 0; i < SWITCH_RELAY_COUNT; i++) {
+      needPublishCurrentState |= !pubSubClient.publish(PubSubSwitchTopic[i].c_str(), switchRelayState[i] == On ? "1" : "0");
+    }
   }
 
-  // if (switchUpdateFlags > 0) {
-  //   for (int i = SWITCH_RELAY_COUNT-1; i >= 0; i--) {
-  //     if (switchUpdateFlags - pow(2, i) >= 0) {
-  //       pubSubClient.publish(PubSubSwitchTopic[i].c_str(), (uint8_t)switchState[i] > 0 ? "1" : "0");
-  //       switchUpdateFlags -= pow(2, i);
-  //     }
-  //   }
-  // }
+  ArduinoOTA.handle();
 
 #if 0
   if (lastUptimeUpdate - now > 1000) {
@@ -199,43 +273,4 @@ void loop() {
     // lcd.print(buf);
   }
 #endif
-}
-
-void handleSwitchControlMessage(uint8_t switchId, byte* payload, unsigned int length) {
-  switch (length) {
-    case 1: 
-      switch (payload[0]) {
-        case '1': setSwitch(switchId, On); return;
-        case '0': setSwitch(switchId, Off); return;
-        default: return;
-      }
-      break;
-    case 2:
-    case 3:
-      switch (payload[1]) {
-        case 'n': setSwitch(switchId, On); return;
-        case 'f': setSwitch(switchId, Off); return;
-      }
-      break;
-    case 4: setSwitch(switchId, On); return;
-    case 5: setSwitch(switchId, Off); return;
-    default: return;
-  }  
-}
-
-void onMqttMessage(char* topic, byte* payload, unsigned int length) {
-  if (length == 0) return;
-  log_d("Handle message from '%s':\n%s", topic, (char*)payload);
-
-  String topicStr = topic;
-  for (uint8_t i = 0; i < SWITCH_RELAY_COUNT; i++) {
-    if (PubSubSwitchTopic[i] == topicStr) {
-      handleSwitchControlMessage(i, payload, length);
-      return;
-    }
-  }
-  
-  if (PubSubRestartControlTopic == topicStr) {
-    ESP.restart();
-  }
 }
