@@ -83,7 +83,8 @@ unsigned long
   lastWifiOnline = 0,
   lastPubSubReconnectAttempt = 0,
   lastUptimeUpdate = 0,
-  lastMotionDetected = 0;
+  lastMotionDetected = 0,
+  lastWifiRSSI = 0;
 
 bool 
   needPublishCurrentState = true,
@@ -271,7 +272,19 @@ void loop() {
   }
 
   if (!wifiLoop()) {
+    lcd.setCursor(0, 1);
+    lcd.print("NO WIFI CONNECTION!");
     return;
+  }
+  else {
+    if (now - lastWifiRSSI > 2000) {
+      lastWifiRSSI = now;
+      lcd.setCursor(0, 1);
+      lcd.print("                    ");
+      lcd.setCursor(0, 1);
+      lcd.print("WIFI: ");
+      lcd.print(WiFi.RSSI());
+    }
   }
 
   pubSubClientLoop();
