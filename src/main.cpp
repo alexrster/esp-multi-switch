@@ -74,6 +74,8 @@ const String PubSubSwitchTopic[] = {
   MQTT_SWITCH_STATE_TOPIC(8),
 };
 
+const char* PubSubMotionStateTopic = "balcony/motion";
+
 SwitchRelay* switchRelays[SWITCH_RELAY_COUNT];
 
 unsigned long 
@@ -85,6 +87,7 @@ unsigned long
 
 bool 
   needPublishCurrentState = true,
+  needPublishMotionState = true,
   spiffsEnabled = true;
 
 WiFiClient wifiClient;
@@ -189,6 +192,8 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
 
 void onMotionSensor() {
   log_d("On MotionSensor event: state=%s", motionSensor.getState() == None ? "NONE" : "DETECTED");
+  needPublishMotionState = true;
+
   lcd.setCursor(0, 2);
 
   if (motionSensor.getState() == Detected) {
@@ -277,6 +282,10 @@ void loop() {
     for (uint8_t i = 0; i < SWITCH_RELAY_COUNT; i++) {
       needPublishCurrentState |= !pubSubClient.publish(PubSubSwitchTopic[i].c_str(), switchRelays[i]->getState() == On ? "1" : "0");
     }
+  }
+
+  if (needPublishMotionState) {
+    needPublishMotionState = !pubSubClient.publish(PubSubMotionStateTopic, motionSensor.getState() != None ? "1" : "0");
   }
 
   ArduinoOTA.handle();
