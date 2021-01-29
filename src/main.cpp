@@ -9,10 +9,10 @@
 #include <SPIFFS.h>
 #include <ArduinoJson.h>
 #include "SwitchRelay.h"
+#include "MotionSensor.h"
 #include "version.h"
 
-#define LCD_SDA                       21
-#define LCD_SCL                       22
+#define LCD_BACKLIGHT_TIMEOUT_MILLIS  15000
 
 #define SWITCH_RELAY_COUNT            8
 
@@ -24,6 +24,8 @@
 #define SWITCH_RELAY5_PIN             23 // GPIO23
 #define SWITCH_RELAY6_PIN             19 // GPIO19
 #define SWITCH_RELAY7_PIN             18 // GPIO18
+
+#define MOTION_SENSOR_PIN             39 // GPIO39
 
 #ifndef INT_LED_PIN
 #define INT_LED_PIN                   2  // GPIO2
@@ -78,7 +80,8 @@ unsigned long
   now = 0,
   lastWifiOnline = 0,
   lastPubSubReconnectAttempt = 0,
-  lastUptimeUpdate = 0;
+  lastUptimeUpdate = 0,
+  lastMotionDetected = 0;
 
 bool 
   needPublishCurrentState = true,
@@ -87,6 +90,7 @@ bool
 WiFiClient wifiClient;
 PubSubClient pubSubClient(wifiClient);
 hd44780_I2Cexp lcd;
+MotionSensor motionSensor(MOTION_SENSOR_PIN);
 
 bool reconnectPubSub() {
   if (now - lastPubSubReconnectAttempt > MQTT_RECONNECT_MILLIS) {
@@ -183,6 +187,19 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
   }
 }
 
+void onMotionSensor() {
+  log_d("On MotionSensor event: state=%s", motionSensor.getState() == None ? "NONE" : "DETECTED");
+  lcd.setCursor(0, 2);
+
+  if (motionSensor.getState() == Detected) {
+    lcd.backlight();
+    lcd.print("Motion DETECTED!");
+    lastMotionDetected = now;
+  }
+  else
+    lcd.print("                    ");
+}
+
 void setupLcd() {
   int status = lcd.begin(20, 4);
   log_d("LCD init: status=%d", status);
@@ -221,6 +238,8 @@ void setup() {
 
   setupLcd();
 
+  motionSensor.onChanged(onMotionSensor);
+
   WiFi.setHostname(WIFI_HOSTNAME);
   WiFi.begin(WIFI_SSID, WIFI_PASSPHRASE);
 
@@ -239,6 +258,12 @@ void setup() {
 
 void loop() {
   now = millis();
+
+  motionSensor.loop();
+
+  if (now - lastMotionDetected > LCD_BACKLIGHT_TIMEOUT_MILLIS) {
+    lcd.noBacklight();
+  }
 
   if (!wifiLoop()) {
     return;
