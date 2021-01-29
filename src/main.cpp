@@ -3,37 +3,32 @@
 #include <PubSubClient.h>
 #include <ArduinoOTA.h>
 #include <Wire.h>
-#include <LiquidCrystal_I2C.h>
+#include <hd44780.h>
+#include <hd44780ioClass/hd44780_I2Cexp.h>
 #include <FS.h>
 #include <SPIFFS.h>
+#include <ArduinoJson.h>
+#include "SwitchRelay.h"
 #include "version.h"
 
 #define LCD_SDA                       21
 #define LCD_SCL                       22
 
-#ifndef SWITCH_RELAY_COUNT
-#define SWITCH_RELAY_COUNT            4
-#endif
+#define SWITCH_RELAY_COUNT            8
 
-#ifndef SWITCH_RELAY0_PIN
 #define SWITCH_RELAY0_PIN             27 // GPIO27
-#endif
-
-#ifndef SWITCH_RELAY1_PIN
 #define SWITCH_RELAY1_PIN             32 // GPIO32
-#endif
-
-#ifndef SWITCH_RELAY2_PIN
 #define SWITCH_RELAY2_PIN             4  // GPIO4
-#endif
-
-#ifndef SWITCH_RELAY3_PIN
 #define SWITCH_RELAY3_PIN             0  // GPIO0
-#endif
+#define SWITCH_RELAY4_PIN             5  // GPIO5
+#define SWITCH_RELAY5_PIN             23 // GPIO23
+#define SWITCH_RELAY6_PIN             19 // GPIO19
+#define SWITCH_RELAY7_PIN             18 // GPIO18
 
 #ifndef INT_LED_PIN
 #define INT_LED_PIN                   2  // GPIO2
 #endif
+
 #define APP_INIT_DELAY_MILLIS         2500
 
 #define WIFI_SSID                     "qx.zone"
@@ -56,18 +51,13 @@
 #endif
 
 #define MQTT_STATUS_TOPIC             MQTT_CLIENT_ID "/status"
-#define MQTT_SWITCH_STATE_TOPIC(x)    MQTT_CLIENT_ID "/" #x
 #define MQTT_RESTART_CONTROL_TOPIC    MQTT_CLIENT_ID "/restart"
+#define MQTT_SWITCH_STATE_TOPIC(x)    MQTT_CLIENT_ID "/" #x
 
 #define MQTT_STATUS_ONLINE_MSG        "online"
 #define MQTT_STATUS_OFFLINE_MSG       "offline"
 
 #define SWITCH_STATE_FILENAME "/state.bin"
-
-typedef enum SwitchState : uint8_t { 
-  On = 0,  // inversed logic on solid state relays board I own
-  Off = 1 
-} SwitchState_t;
 
 const String PubSubRestartControlTopic = String(MQTT_RESTART_CONTROL_TOPIC);
 
@@ -75,15 +65,14 @@ const String PubSubSwitchTopic[] = {
   MQTT_SWITCH_STATE_TOPIC(1), 
   MQTT_SWITCH_STATE_TOPIC(2), 
   MQTT_SWITCH_STATE_TOPIC(3), 
-  MQTT_SWITCH_STATE_TOPIC(4) 
+  MQTT_SWITCH_STATE_TOPIC(4),
+  MQTT_SWITCH_STATE_TOPIC(5),
+  MQTT_SWITCH_STATE_TOPIC(6),
+  MQTT_SWITCH_STATE_TOPIC(7),
+  MQTT_SWITCH_STATE_TOPIC(8),
 };
 
-const uint8_t SwitchRelayPin[] = {
-  SWITCH_RELAY0_PIN,
-  SWITCH_RELAY1_PIN,
-  SWITCH_RELAY2_PIN,
-  SWITCH_RELAY3_PIN,
-};
+SwitchRelay* switchRelays[SWITCH_RELAY_COUNT];
 
 unsigned long 
   now = 0,
@@ -97,9 +86,7 @@ bool
 
 WiFiClient wifiClient;
 PubSubClient pubSubClient(wifiClient);
-SwitchState_t switchRelayState[SWITCH_RELAY_COUNT] = { Off, Off, Off, Off };
-// LiquidCrystal_I2C lcd(0x27); // 0x3F ??? 0x27 -- seems to able to control it at least
-// LiquidCrystal_I2C lcd(0x3F); // 0x3F ??? 0x27 -- seems to able to control it at least
+hd44780_I2Cexp lcd;
 
 bool reconnectPubSub() {
   if (now - lastPubSubReconnectAttempt > MQTT_RECONNECT_MILLIS) {
@@ -144,15 +131,14 @@ void saveSwitchState() {
 
   auto f = SPIFFS.open(SWITCH_STATE_FILENAME, FILE_WRITE);
   for (uint8_t i = 0; i < SWITCH_RELAY_COUNT; i++) {
-    f.write(switchRelayState[i] == On ? '1' : '0');
+    f.write(switchRelays[i]->getState() == On ? '1' : '0');
   }
   f.close();
 }
 
 void setSwitchState(uint8_t switchId, SwitchState_t newSwitchState, bool saveState = true) {
-  log_i("Set switch %d to %s, pin%d=%d", switchId, newSwitchState == On ? "ON" : "OFF", SwitchRelayPin[switchId], (uint8_t)newSwitchState);
-  digitalWrite(SwitchRelayPin[switchId], (uint8_t)newSwitchState);
-  switchRelayState[switchId] = newSwitchState;
+  log_i("Set switch %d to %s", switchId, newSwitchState == On ? "ON" : "OFF");
+  switchRelays[switchId]->setState(newSwitchState);
 
   if (saveState)
     saveSwitchState();
@@ -197,11 +183,24 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
   }
 }
 
+void setupLcd() {
+  int status = lcd.begin(20, 4);
+  log_d("LCD init: status=%d", status);
+
+  lcd.backlight();
+  lcd.home();
+  lcd.print(WIFI_HOSTNAME);
+}
+
 void setup() {
-  // lcd.begin(16, 2);
-  // lcd.backlight();
-  // lcd.home();
-  // lcd.print(WIFI_HOSTNAME);  
+  switchRelays[0] = new SwitchRelayPin(SWITCH_RELAY0_PIN, 0);
+  switchRelays[1] = new SwitchRelayMock();
+  switchRelays[2] = new SwitchRelayMock();
+  switchRelays[3] = new SwitchRelayMock();
+  switchRelays[4] = new SwitchRelayPin(SWITCH_RELAY4_PIN, 0);
+  switchRelays[5] = new SwitchRelayPin(SWITCH_RELAY5_PIN, 0);
+  switchRelays[6] = new SwitchRelayPin(SWITCH_RELAY6_PIN, 0);
+  switchRelays[7] = new SwitchRelayPin(SWITCH_RELAY7_PIN, 0);
 
   if(spiffsEnabled && !SPIFFS.begin(true)){
     log_e("SPIFFS mount failed");
@@ -214,16 +213,13 @@ void setup() {
     f.readBytes(b, SWITCH_RELAY_COUNT);
 
     for (uint8_t i = 0; i < SWITCH_RELAY_COUNT; i++) {
-      switchRelayState[i] = b[i] == '1' ? On : Off;
+      switchRelays[i]->setState(b[i] == '1' ? On : Off);
     }
 
     f.close();
   }
 
-  for (uint8_t i = 0; i < SWITCH_RELAY_COUNT; i++) {
-    pinMode(SwitchRelayPin[i], OUTPUT);
-    setSwitchState(i, switchRelayState[i], false);
-  }
+  setupLcd();
 
   WiFi.setHostname(WIFI_HOSTNAME);
   WiFi.begin(WIFI_SSID, WIFI_PASSPHRASE);
@@ -237,16 +233,16 @@ void setup() {
   now = millis();
   lastWifiOnline = now;
 
-  // lcd.setCursor(0, 1);
-  // lcd.print("READY!");
-  // lastUptimeUpdate = now + 5000;
+  lcd.setCursor(0, 1);
+  lcd.print("READY!");
 }
 
 void loop() {
   now = millis();
 
-  if (!wifiLoop())
+  if (!wifiLoop()) {
     return;
+  }
 
   pubSubClientLoop();
 
@@ -254,7 +250,7 @@ void loop() {
     needPublishCurrentState = false;
 
     for (uint8_t i = 0; i < SWITCH_RELAY_COUNT; i++) {
-      needPublishCurrentState |= !pubSubClient.publish(PubSubSwitchTopic[i].c_str(), switchRelayState[i] == On ? "1" : "0");
+      needPublishCurrentState |= !pubSubClient.publish(PubSubSwitchTopic[i].c_str(), switchRelays[i]->getState() == On ? "1" : "0");
     }
   }
 
