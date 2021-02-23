@@ -53,13 +53,16 @@
 #endif
 
 #define MQTT_STATUS_TOPIC             MQTT_CLIENT_ID "/status"
+#define MQTT_VERSION_TOPIC            MQTT_CLIENT_ID "/version"
 #define MQTT_RESTART_CONTROL_TOPIC    MQTT_CLIENT_ID "/restart"
 #define MQTT_SWITCH_STATE_TOPIC(x)    MQTT_CLIENT_ID "/" #x
 
 #define MQTT_STATUS_ONLINE_MSG        "online"
 #define MQTT_STATUS_OFFLINE_MSG       "offline"
 
-#define SWITCH_STATE_FILENAME "/state.bin"
+#define SWITCH_STATE_FILENAME         "/state.bin"
+
+#define OTA_UPDATE_TIMEOUT_MILLIS     5*60000
 
 const String PubSubRestartControlTopic = String(MQTT_RESTART_CONTROL_TOPIC);
 
@@ -81,27 +84,35 @@ SwitchRelay* switchRelays[SWITCH_RELAY_COUNT];
 unsigned long 
   now = 0,
   lastWifiOnline = 0,
+  lastWifiReconnect = 0,
   lastPubSubReconnectAttempt = 0,
   lastUptimeUpdate = 0,
   lastMotionDetected = 0,
-  lastWifiRSSI = 0;
+  lastWifiRSSI = 0,
+  otaUpdateStart = 0;
 
 bool 
   needPublishCurrentState = true,
   needPublishMotionState = true,
-  spiffsEnabled = true;
+  spiffsEnabled = true,
+  otaUpdateMode = false;
 
 WiFiClient wifiClient;
 PubSubClient pubSubClient(wifiClient);
 hd44780_I2Cexp lcd;
 MotionSensor motionSensor(MOTION_SENSOR_PIN);
 
+void restart() {
+  ESP.restart();
+}
+
 bool reconnectPubSub() {
   if (now - lastPubSubReconnectAttempt > MQTT_RECONNECT_MILLIS) {
     lastPubSubReconnectAttempt = now;
 
     if (pubSubClient.connect(MQTT_CLIENT_ID, MQTT_USERNAME, MQTT_PASSWORD, MQTT_STATUS_TOPIC, MQTTQOS0, true, MQTT_STATUS_OFFLINE_MSG, false)) {
-      pubSubClient.publish(MQTT_STATUS_TOPIC, VERSION, true);
+      pubSubClient.publish(MQTT_STATUS_TOPIC, MQTT_STATUS_ONLINE_MSG, true);
+      pubSubClient.publish(MQTT_VERSION_TOPIC, VERSION, true);
       
       pubSubClient.subscribe(MQTT_RESTART_CONTROL_TOPIC, MQTTQOS0);
 
@@ -124,7 +135,15 @@ void pubSubClientLoop() {
 
 bool wifiLoop() {
   if (WiFi.status() != WL_CONNECTED) {
-    if(now - lastWifiOnline > WIFI_WATCHDOG_MILLIS) ESP.restart();
+    if (now - lastWifiOnline > WIFI_WATCHDOG_MILLIS) restart();
+    else if (now - lastWifiReconnect > WIFI_RECONNECT_MILLIS) {
+      lastWifiReconnect = now;
+
+      if (WiFi.reconnect()) {
+        lastWifiOnline = now;
+        return true;
+      }
+    }
 
     return false;
   }
@@ -215,6 +234,11 @@ void setupLcd() {
   lcd.print(WIFI_HOSTNAME);
 }
 
+void otaStarted() {
+  otaUpdateStart = now;
+  otaUpdateMode = true;
+}
+
 void setup() {
   switchRelays[0] = new SwitchRelayPin(SWITCH_RELAY0_PIN, 0);
   switchRelays[1] = new SwitchRelayMock();
@@ -250,6 +274,8 @@ void setup() {
   WiFi.begin(WIFI_SSID, WIFI_PASSPHRASE);
 
   ArduinoOTA.setRebootOnSuccess(true);
+  ArduinoOTA.onStart(otaStarted);
+  ArduinoOTA.onEnd(restart);
   ArduinoOTA.begin();
 
   pubSubClient.setCallback(onMqttMessage);
@@ -264,6 +290,11 @@ void setup() {
 
 void loop() {
   now = millis();
+
+  if (otaUpdateMode) {
+    if (now - otaUpdateStart > OTA_UPDATE_TIMEOUT_MILLIS) ESP.restart();
+    return;
+  }
 
   motionSensor.loop();
 
