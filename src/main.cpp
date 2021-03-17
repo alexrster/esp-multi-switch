@@ -13,6 +13,8 @@
 #include "version.h"
 
 #define LCD_BACKLIGHT_TIMEOUT_MILLIS  15000
+#define LCD_PROGRESS_BAR_CHAR         0xff
+#define LCD_PROGRESS_BAR              "" LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR
 
 #define SWITCH_RELAY_COUNT            8
 
@@ -56,6 +58,9 @@
 #define MQTT_VERSION_TOPIC            MQTT_CLIENT_ID "/version"
 #define MQTT_RESTART_CONTROL_TOPIC    MQTT_CLIENT_ID "/restart"
 #define MQTT_SWITCH_STATE_TOPIC(x)    MQTT_CLIENT_ID "/" #x
+#define MQTT_BACKLIGHT_TOPIC          MQTT_CLIENT_ID "/backlight"
+#define MQTT_CONFIG_TOPIC             MQTT_CLIENT_ID "/config"
+#define MQTT_CURRENT_MEETING_TOPIC    "ay/calendar/events/current"
 
 #define MQTT_STATUS_ONLINE_MSG        "online"
 #define MQTT_STATUS_OFFLINE_MSG       "offline"
@@ -64,7 +69,16 @@
 
 #define OTA_UPDATE_TIMEOUT_MILLIS     5*60000
 
+struct config_t {
+  bool motion = true;
+  bool backlight = true;
+  unsigned int backlightTimeout = LCD_BACKLIGHT_TIMEOUT_MILLIS;
+} Config;
+
 const String PubSubRestartControlTopic = String(MQTT_RESTART_CONTROL_TOPIC);
+const String PubSubCurrentMeetingTopic = String(MQTT_CURRENT_MEETING_TOPIC);
+const String PubSubBacklightTopic = String(MQTT_BACKLIGHT_TOPIC);
+const String PubSubConfigTopic = String(MQTT_CONFIG_TOPIC);
 
 const String PubSubSwitchTopic[] = { 
   MQTT_SWITCH_STATE_TOPIC(1), 
@@ -78,6 +92,20 @@ const String PubSubSwitchTopic[] = {
 };
 
 const char* PubSubMotionStateTopic = "balcony/motion";
+
+// const PROGMEM uint8_t invertedNumbers[4][8] = {
+//   { 0x1F, 0x1F, 0x11, 0x15, 0x15, 0x11, 0x1F, 0x1F }, // 1: o
+//   { 0x1F, 0x1F, 0x11, 0x15, 0x15, 0x15, 0x1F, 0x1F }, // 2: n
+//   { 0x1F, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x1F }, // 3: left half-rect
+//   { 0x1F, 0x00, 0x00, 0x18, 0x00, 0x00, 0x00, 0x1F }  // 4: right half-rect
+// };
+
+const PROGMEM uint8_t invertedNumbers[4][8] = {
+  { 0x1F, 0x1F, 0x1E, 0x1E, 0x1F, 0x1F, 0x1F, 0x1F }, // 1: o
+  { 0x1F, 0x1F, 0x1F, 0x07, 0x0F, 0x0F, 0x1F, 0x1F }, // 2: n
+  { 0x1F, 0x10, 0x10, 0x11, 0x11, 0x10, 0x10, 0x1F }, // 3: left half-rect
+  { 0x1F, 0x01, 0x01, 0x11, 0x11, 0x01, 0x01, 0x1F }  // 4: right half-rect
+};
 
 SwitchRelay* switchRelays[SWITCH_RELAY_COUNT];
 
@@ -106,6 +134,13 @@ void restart() {
   ESP.restart();
 }
 
+void setLcdBacklight(boolean state) {
+  if (!Config.backlight) return;
+
+  if (state) lcd.backlight();
+  else lcd.noBacklight();
+}
+
 bool reconnectPubSub() {
   if (now - lastPubSubReconnectAttempt > MQTT_RECONNECT_MILLIS) {
     lastPubSubReconnectAttempt = now;
@@ -115,6 +150,9 @@ bool reconnectPubSub() {
       pubSubClient.publish(MQTT_VERSION_TOPIC, VERSION, true);
       
       pubSubClient.subscribe(MQTT_RESTART_CONTROL_TOPIC, MQTTQOS0);
+      pubSubClient.subscribe(MQTT_CURRENT_MEETING_TOPIC, MQTTQOS0);
+      pubSubClient.subscribe(MQTT_BACKLIGHT_TOPIC, MQTTQOS0);
+      pubSubClient.subscribe(MQTT_CONFIG_TOPIC, MQTTQOS0);
 
       for (uint8_t i = 0; i < SWITCH_RELAY_COUNT; i++) {
         pubSubClient.subscribe(PubSubSwitchTopic[i].c_str(), MQTTQOS0);
@@ -171,26 +209,34 @@ void setSwitchState(uint8_t switchId, SwitchState_t newSwitchState, bool saveSta
     saveSwitchState();
 }
 
-void handleSwitchControlMessage(uint8_t switchId, byte* payload, unsigned int length) {
+boolean parseBooleanMessage(byte* payload, unsigned int length, boolean defaultValue = false) {
   switch (length) {
     case 1: 
       switch (payload[0]) {
-        case '1': setSwitchState(switchId, On); return;
-        case '0': setSwitchState(switchId, Off); return;
-        default: return;
+        case '1': return true;
+        case '0': return false;
+        default: return defaultValue;
       }
       break;
     case 2:
     case 3:
       switch (payload[1]) {
-        case 'n': setSwitchState(switchId, On); return;
-        case 'f': setSwitchState(switchId, Off); return;
+        case 'n': return true;
+        case 'f': return false;
       }
       break;
-    case 4: setSwitchState(switchId, On); return;
-    case 5: setSwitchState(switchId, Off); return;
-    default: return;
+    case 4: return true;
+    case 5: return false;
+    default: return defaultValue;
   }  
+}
+
+void updateSwitchControlLcd() {
+  lcd.setCursor(0, 3);
+  for (uint8_t i = 0; i < SWITCH_RELAY_COUNT; i++) {
+    lcd.print(switchRelays[i]->getState() == On ? "\1\2" : "\3\4");
+    if (i > 0 && (i+1)%4 == 0) lcd.print("  ");
+  }
 }
 
 void onMqttMessage(char* topic, byte* payload, unsigned int length) {
@@ -200,13 +246,29 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
   String topicStr = topic;
   for (uint8_t i = 0; i < SWITCH_RELAY_COUNT; i++) {
     if (PubSubSwitchTopic[i] == topicStr) {
-      handleSwitchControlMessage(i, payload, length);
+      setSwitchState(i, parseBooleanMessage(payload, length, (switchRelays[i]->getState() == On)) ? On : Off);
+      updateSwitchControlLcd();
       return;
     }
   }
   
-  if (PubSubRestartControlTopic == topicStr) {
-    ESP.restart();
+  if (PubSubBacklightTopic == topicStr) {
+    setLcdBacklight(parseBooleanMessage(payload, length));
+  }
+  else if (PubSubConfigTopic == topicStr) {
+    auto f = SPIFFS.open("/config.json", "w");
+    f.write(payload, length);
+    f.close();
+
+    restart();
+    return;
+  }
+  else if (PubSubRestartControlTopic == topicStr) {
+    restart();
+  }
+  else if (PubSubCurrentMeetingTopic == topicStr) {
+    lcd.setCursor(0, 1);
+    lcd.print((char*)payload);
   }
 }
 
@@ -214,29 +276,83 @@ void onMotionSensor() {
   log_d("On MotionSensor event: state=%s", motionSensor.getState() == None ? "NONE" : "DETECTED");
   needPublishMotionState = true;
 
-  lcd.setCursor(0, 2);
-
   if (motionSensor.getState() == Detected) {
-    lcd.backlight();
-    lcd.print("Motion DETECTED!");
     lastMotionDetected = now;
+    setLcdBacklight(true);
   }
-  else
-    lcd.print("                    ");
 }
 
 void setupLcd() {
   int status = lcd.begin(20, 4);
   log_d("LCD init: status=%d", status);
 
-  lcd.backlight();
+	for(uint8_t i=0; i < 4; i++)
+		lcd.createChar(i+1, invertedNumbers[i]);
+
+  setLcdBacklight(true);
   lcd.home();
   lcd.print(WIFI_HOSTNAME);
 }
 
 void otaStarted() {
+  now = millis();
   otaUpdateStart = now;
   otaUpdateMode = true;
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  setLcdBacklight(true);
+  lcd.print(" UPDATING FIRMWARE");
+}
+
+void otaProgress(unsigned int currentBytes, unsigned int totalBytes) {
+  now = millis();
+
+  unsigned int 
+    minutes = (now-otaUpdateStart)/1000./60.,
+    seconds = (now-otaUpdateStart)/1000. - minutes*60,
+    progress = ((float)currentBytes / totalBytes) * 21;
+
+  lcd.setCursor(0, 1);
+  for (int i=0; i<=progress && i<20; i++) {
+    lcd.print((char)0xFF);
+  }
+  
+  lcd.setCursor(0, 2);
+  lcd.printf("%dB / %dB", currentBytes, totalBytes);
+
+  lcd.setCursor(0, 3);
+  lcd.printf("%02d:%02d", minutes, seconds);
+}
+
+void otaEnd() {
+  lcd.clear();
+  lcd.setCursor(0, 1);
+  lcd.print("        DONE        ");
+
+  for (int i=0;i<10;i++) {
+    if (i%2) setLcdBacklight(false);
+    else setLcdBacklight(true);
+    delay(200);
+  }
+
+  restart();
+}
+
+void otaError(ota_error_t error) {
+  lcd.clear();
+  lcd.setCursor(0, 1);
+
+  for (int i=0;i<2;i++) {
+    if (i%2) setLcdBacklight(false);
+    else setLcdBacklight(true);
+    delay(200);
+  }
+
+  lcd.printf("ERROR: %d", error);
+
+  delay(5000);
+  restart();
 }
 
 void setup() {
@@ -265,17 +381,35 @@ void setup() {
 
     f.close();
   }
+  
+  if (spiffsEnabled && SPIFFS.exists("/config.json")) {
+    auto f = SPIFFS.open("/config.json");
+    StaticJsonDocument<1024> jdoc;
+    DeserializationError error = deserializeJson(jdoc, f);
+
+    if (!error) {
+      Config.backlight = jdoc["backlight"];
+      Config.backlightTimeout = jdoc["backlightTimeout"];
+      Config.motion = jdoc["motion"];
+    }
+
+    f.close();
+  }
 
   setupLcd();
 
-  motionSensor.onChanged(onMotionSensor);
+  if (Config.motion) {
+    motionSensor.onChanged(onMotionSensor);
+  }
 
   WiFi.setHostname(WIFI_HOSTNAME);
   WiFi.begin(WIFI_SSID, WIFI_PASSPHRASE);
 
   ArduinoOTA.setRebootOnSuccess(true);
   ArduinoOTA.onStart(otaStarted);
-  ArduinoOTA.onEnd(restart);
+  ArduinoOTA.onProgress(otaProgress);
+  ArduinoOTA.onEnd(otaEnd);
+  ArduinoOTA.onError(otaError);
   ArduinoOTA.begin();
 
   pubSubClient.setCallback(onMqttMessage);
@@ -284,35 +418,40 @@ void setup() {
   now = millis();
   lastWifiOnline = now;
 
-  lcd.setCursor(0, 1);
+  lcd.setCursor(0, 0);
   lcd.print("READY!");
+  lcd.noBacklight();
 }
 
 void loop() {
   now = millis();
 
   if (otaUpdateMode) {
-    if (now - otaUpdateStart > OTA_UPDATE_TIMEOUT_MILLIS) ESP.restart();
+    if (now - otaUpdateStart > OTA_UPDATE_TIMEOUT_MILLIS) restart();
+    
+    ArduinoOTA.handle();
     return;
   }
 
-  motionSensor.loop();
+  if (Config.motion) {
+    motionSensor.loop();
+  }
 
-  if (now - lastMotionDetected > LCD_BACKLIGHT_TIMEOUT_MILLIS) {
-    lcd.noBacklight();
+  if (now - lastMotionDetected > Config.backlightTimeout) {
+    setLcdBacklight(false);
   }
 
   if (!wifiLoop()) {
-    lcd.setCursor(0, 1);
+    lcd.setCursor(0, 0);
     lcd.print("NO WIFI CONNECTION!");
     return;
   }
   else {
     if (now - lastWifiRSSI > 2000) {
       lastWifiRSSI = now;
-      lcd.setCursor(0, 1);
+      lcd.setCursor(0, 0);
       lcd.print("                    ");
-      lcd.setCursor(0, 1);
+      lcd.setCursor(0, 0);
       lcd.print("WIFI: ");
       lcd.print(WiFi.RSSI());
     }
@@ -333,18 +472,4 @@ void loop() {
   }
 
   ArduinoOTA.handle();
-
-#if 0
-  if (lastUptimeUpdate - now > 1000) {
-    lastUptimeUpdate = now;
-
-    char buf[32];
-    unsigned int 
-      hours = now % (1000 * 60 * 60),
-      minutes = (now - hours * 1000 * 60 * 60) % (1000 * 60),
-      seconds = (now - hours * 1000 * 60 * 60 - minutes * 1000 * 60) % 1000;
-    // sprintf(buf, "UPTIME: %02d:%02d:%02d", hours, minutes, seconds);
-    // lcd.print(buf);
-  }
-#endif
 }
