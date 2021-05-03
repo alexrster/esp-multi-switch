@@ -174,14 +174,14 @@ void pubSubClientLoop() {
 bool wifiLoop() {
   if (WiFi.status() != WL_CONNECTED) {
     if (now - lastWifiOnline > WIFI_WATCHDOG_MILLIS) restart();
-    else if (now - lastWifiReconnect > WIFI_RECONNECT_MILLIS) {
-      lastWifiReconnect = now;
+    // else if (now - lastWifiReconnect > WIFI_RECONNECT_MILLIS) {
+    //   lastWifiReconnect = now;
 
-      if (WiFi.reconnect()) {
-        lastWifiOnline = now;
-        return true;
-      }
-    }
+    //   if (WiFi.reconnect()) {
+    //     lastWifiOnline = now;
+    //     return true;
+    //   }
+    // }
 
     return false;
   }
@@ -357,9 +357,9 @@ void otaError(ota_error_t error) {
 
 void setup() {
   switchRelays[0] = new SwitchRelayPin(SWITCH_RELAY0_PIN, 0);
-  switchRelays[1] = new SwitchRelayMock();
-  switchRelays[2] = new SwitchRelayMock();
-  switchRelays[3] = new SwitchRelayMock();
+  switchRelays[1] = new SwitchRelayPin(SWITCH_RELAY1_PIN, 0);
+  switchRelays[2] = new SwitchRelayPin(SWITCH_RELAY2_PIN, 0);
+  switchRelays[3] = new SwitchRelayPin(SWITCH_RELAY3_PIN, 0);
   switchRelays[4] = new SwitchRelayPin(SWITCH_RELAY4_PIN, 0);
   switchRelays[5] = new SwitchRelayPin(SWITCH_RELAY5_PIN, 0);
   switchRelays[6] = new SwitchRelayPin(SWITCH_RELAY6_PIN, 0);
@@ -403,6 +403,8 @@ void setup() {
   }
 
   WiFi.setHostname(WIFI_HOSTNAME);
+  WiFi.setAutoConnect(true);
+  WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_PASSPHRASE);
 
   ArduinoOTA.setRebootOnSuccess(true);

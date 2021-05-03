@@ -1,5 +1,5 @@
 {
   "motion": true,
-  "backlight": false,
+  "backlight": true,
   "backlightTimeout": 15000
 }
