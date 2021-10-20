@@ -37,8 +37,8 @@
 
 #define WIFI_SSID                     "qx.zone"
 #define WIFI_PASSPHRASE               "1234Qwer-"
-#define WIFI_RECONNECT_MILLIS         1000
-#define WIFI_WATCHDOG_MILLIS          5*60000
+#define WIFI_RECONNECT_MILLIS         10000
+#define WIFI_WATCHDOG_MILLIS          60000
 
 #ifndef WIFI_HOSTNAME
 #define WIFI_HOSTNAME                 "multiswitch-01"
@@ -60,7 +60,7 @@
 #define MQTT_SWITCH_STATE_TOPIC(x)    MQTT_CLIENT_ID "/" #x
 #define MQTT_BACKLIGHT_TOPIC          MQTT_CLIENT_ID "/backlight"
 #define MQTT_CONFIG_TOPIC             MQTT_CLIENT_ID "/config"
-#define MQTT_CURRENT_MEETING_TOPIC    "ay/calendar/events/current"
+#define MQTT_CURRENT_MEETING_TOPIC    "ay/calendar/events/current/title"
 
 #define MQTT_STATUS_ONLINE_MSG        "online"
 #define MQTT_STATUS_OFFLINE_MSG       "offline"
@@ -93,13 +93,6 @@ const String PubSubSwitchTopic[] = {
 
 const char* PubSubMotionStateTopic = "balcony/motion";
 
-// const PROGMEM uint8_t invertedNumbers[4][8] = {
-//   { 0x1F, 0x1F, 0x11, 0x15, 0x15, 0x11, 0x1F, 0x1F }, // 1: o
-//   { 0x1F, 0x1F, 0x11, 0x15, 0x15, 0x15, 0x1F, 0x1F }, // 2: n
-//   { 0x1F, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x1F }, // 3: left half-rect
-//   { 0x1F, 0x00, 0x00, 0x18, 0x00, 0x00, 0x00, 0x1F }  // 4: right half-rect
-// };
-
 const PROGMEM uint8_t invertedNumbers[4][8] = {
   { 0x1F, 0x1F, 0x1E, 0x1E, 0x1F, 0x1F, 0x1F, 0x1F }, // 1: o
   { 0x1F, 0x1F, 0x1F, 0x07, 0x0F, 0x0F, 0x1F, 0x1F }, // 2: n
@@ -117,6 +110,7 @@ unsigned long
   lastUptimeUpdate = 0,
   lastMotionDetected = 0,
   lastWifiRSSI = 0,
+  lastMeetingNameUpdate = 0,
   otaUpdateStart = 0;
 
 bool 
@@ -153,6 +147,7 @@ bool reconnectPubSub() {
       pubSubClient.subscribe(MQTT_CURRENT_MEETING_TOPIC, MQTTQOS0);
       pubSubClient.subscribe(MQTT_BACKLIGHT_TOPIC, MQTTQOS0);
       pubSubClient.subscribe(MQTT_CONFIG_TOPIC, MQTTQOS0);
+      pubSubClient.subscribe(MQTT_CURRENT_MEETING_TOPIC, MQTTQOS0);
 
       for (uint8_t i = 0; i < SWITCH_RELAY_COUNT; i++) {
         pubSubClient.subscribe(PubSubSwitchTopic[i].c_str(), MQTTQOS0);
@@ -174,18 +169,19 @@ void pubSubClientLoop() {
 bool wifiLoop() {
   if (WiFi.status() != WL_CONNECTED) {
     if (now - lastWifiOnline > WIFI_WATCHDOG_MILLIS) restart();
-    // else if (now - lastWifiReconnect > WIFI_RECONNECT_MILLIS) {
-    //   lastWifiReconnect = now;
+    else if (now - lastWifiReconnect > WIFI_RECONNECT_MILLIS) {
+      lastWifiReconnect = now;
 
-    //   if (WiFi.reconnect()) {
-    //     lastWifiOnline = now;
-    //     return true;
-    //   }
-    // }
+      if (WiFi.reconnect()) {
+        lastWifiOnline = now;
+        return true;
+      }
+    }
 
     return false;
   }
   
+  lastWifiReconnect = now;
   lastWifiOnline = now;
   return true;
 }
@@ -228,7 +224,9 @@ boolean parseBooleanMessage(byte* payload, unsigned int length, boolean defaultV
     case 4: return true;
     case 5: return false;
     default: return defaultValue;
-  }  
+  }
+
+  return defaultValue;
 }
 
 void updateSwitchControlLcd() {
@@ -267,8 +265,21 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     restart();
   }
   else if (PubSubCurrentMeetingTopic == topicStr) {
-    lcd.setCursor(0, 1);
-    lcd.print((char*)payload);
+    if (now - lastMeetingNameUpdate > 5000) {
+      lastMeetingNameUpdate = now;
+      
+      char meeting[41];
+      int l = length > 40 ? 40 : length;
+      strncpy(meeting, (const char*)payload, l);
+      meeting[l] = 0;
+
+      lcd.lineWrap();
+      lcd.setCursor(0, 1);
+      lcd.print("                                        ");
+      lcd.setCursor(0, 1);
+      lcd.print(meeting);
+      lcd.noLineWrap();
+    }
   }
 }
 
@@ -283,8 +294,8 @@ void onMotionSensor() {
 }
 
 void setupLcd() {
-  int status = lcd.begin(20, 4);
-  log_d("LCD init: status=%d", status);
+  log_d("Initialize LCD display");
+  lcd.begin(20, 4);
 
 	for(uint8_t i=0; i < 4; i++)
 		lcd.createChar(i+1, invertedNumbers[i]);
@@ -405,6 +416,7 @@ void setup() {
   WiFi.setHostname(WIFI_HOSTNAME);
   WiFi.setAutoConnect(true);
   WiFi.setAutoReconnect(true);
+  WiFi.setSleep(wifi_ps_type_t::WIFI_PS_NONE);
   WiFi.begin(WIFI_SSID, WIFI_PASSPHRASE);
 
   ArduinoOTA.setRebootOnSuccess(true);
