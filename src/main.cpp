@@ -10,6 +10,8 @@
 #include <ArduinoJson.h>
 #include "SwitchRelay.h"
 #include "MotionSensor.h"
+#include "LcdFixedPositionPrint.h"
+#include "LcdMarqueeString.h"
 #include "version.h"
 
 #define LCD_BACKLIGHT_TIMEOUT_MILLIS  15000
@@ -123,6 +125,9 @@ WiFiClient wifiClient;
 PubSubClient pubSubClient(wifiClient);
 hd44780_I2Cexp lcd;
 MotionSensor motionSensor(MOTION_SENSOR_PIN);
+
+LcdFixedPositionPrint meetingTextDisplay(&lcd, 1);
+LcdMarqueeString meetingTextControl(20);
 
 void restart() {
   ESP.restart();
@@ -268,17 +273,12 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     if (now - lastMeetingNameUpdate > 5000) {
       lastMeetingNameUpdate = now;
       
-      char meeting[41];
-      int l = length > 40 ? 40 : length;
+      char meeting[256];
+      int l = length > 255 ? 255 : length;
       strncpy(meeting, (const char*)payload, l);
       meeting[l] = 0;
 
-      lcd.lineWrap();
-      lcd.setCursor(0, 1);
-      lcd.print("                                        ");
-      lcd.setCursor(0, 1);
-      lcd.print(meeting);
-      lcd.noLineWrap();
+      meetingTextControl.setText(meeting);
     }
   }
 }
@@ -484,6 +484,8 @@ void loop() {
   if (needPublishMotionState) {
     needPublishMotionState = !pubSubClient.publish(PubSubMotionStateTopic, motionSensor.getState() != None ? "1" : "0");
   }
+
+  meetingTextControl.draw(&meetingTextDisplay);
 
   ArduinoOTA.handle();
 }
