@@ -1,5 +1,16 @@
 {
   "motion": true,
+  "motionTopic": "balcony/motion",
   "backlight": true,
-  "backlightTimeout": 15000
+  "backlightTimeout": 15000,
+  "relays": [
+    { "pin": 27, "topic": "multiswitch-01/1" },
+    { "pin": 32, "topic": "multiswitch-01/2", "disabled": true },
+    { "pin": 4,  "topic": "multiswitch-01/3", "disabled": true },
+    { "pin": 0,  "topic": "multiswitch-01/4", "disabled": true },
+    { "pin": 5,  "topic": "multiswitch-01/5" },
+    { "pin": 23, "topic": "multiswitch-01/6" },
+    { "pin": 19, "topic": "multiswitch-01/7" },
+    { "pin": 18, "topic": "multiswitch-01/8" }
+  ]
 }
