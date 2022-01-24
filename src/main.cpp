@@ -24,20 +24,22 @@
 
 #define SWITCH_RELAY_COUNT            8
 
-#define SWITCH_RELAY0_PIN             27 // GPIO27
-#define SWITCH_RELAY1_PIN             32 // GPIO32
-#define SWITCH_RELAY2_PIN             4  // GPIO4
-#define SWITCH_RELAY3_PIN             0  // GPIO0
-#define SWITCH_RELAY4_PIN             5  // GPIO5
-#define SWITCH_RELAY5_PIN             23 // GPIO23
-#define SWITCH_RELAY6_PIN             19 // GPIO19
-#define SWITCH_RELAY7_PIN             18 // GPIO18
+#define SWITCH_RELAY0_PIN             25
+#define SWITCH_RELAY1_PIN             32
+#define SWITCH_RELAY2_PIN             4
+#define SWITCH_RELAY3_PIN             2
+#define SWITCH_RELAY4_PIN             5
+#define SWITCH_RELAY5_PIN             23
+#define SWITCH_RELAY6_PIN             19
+#define SWITCH_RELAY7_PIN             18
 
-#define MOTION_SENSOR_PIN             39 // GPIO39
+#define MOTION_SENSOR_PIN             39
 
 #ifndef INT_LED_PIN
-#define INT_LED_PIN                   2  // GPIO2
+#define INT_LED_PIN                   2
 #endif
+
+#define AC_DETECTOR_PIN               26
 
 #define APP_INIT_DELAY_MILLIS         2500
 
@@ -130,6 +132,7 @@ unsigned long
   lastMeetingNameUpdate = 0,
   lastTimeConfig = 0,
   lastClockDraw = 0,
+  lastAcPublish = 0,
   otaUpdateStart = 0;
 
 bool 
@@ -337,6 +340,16 @@ void onMotionSensor() {
   }
 }
 
+unsigned long zc = 0;
+void IRAM_ATTR acDetectorISR() {
+  zc++;
+}
+
+void setupAcDetector() {
+  pinMode(AC_DETECTOR_PIN, INPUT);
+  attachInterrupt(AC_DETECTOR_PIN, acDetectorISR, RISING);
+}
+
 void setupLcd() {
   log_d("Initialize LCD display");
   lcd.begin(20, 4);
@@ -480,6 +493,8 @@ void setup() {
 
   setupLcd();
 
+  setupAcDetector();
+
   if (Config.motion) {
     motionSensor.onChanged(onMotionSensor);
   }
@@ -509,8 +524,19 @@ void setup() {
 }
 
 void loop() {
+  auto before = now;
   now = millis();
 
+  if (now - lastAcPublish > 1000) {
+    auto value = zc;
+    zc = 0;
+
+    pubSubClient.publish(MQTT_CLIENT_ID "/ac/count", String(value).c_str());
+    pubSubClient.publish(MQTT_CLIENT_ID "/ac/millis", String(now - lastAcPublish).c_str());
+
+    lastAcPublish = now;
+  }
+  
   if (otaUpdateMode) {
     if (now - otaUpdateStart > OTA_UPDATE_TIMEOUT_MILLIS) restart(RESET_ON_OTA_TIMEOUT);
     
