@@ -87,7 +87,7 @@
 
 #define OTA_UPDATE_TIMEOUT_MILLIS     5*60000
 
-#define WDT_TIMEOUT_SEC               60
+#define WDT_TIMEOUT_SEC               10
 
 typedef std::function<void(void)> ActionCallback;
 
