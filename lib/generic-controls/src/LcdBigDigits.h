@@ -6,7 +6,7 @@
 #define BIG_DIGIT_FIRST_CHAR_INDEX     4
 
 void setupBigDigit(hd44780 *lcd);
-void showBigNumber(hd44780 *lcd, int value, int position);
+void showBigDigit(hd44780 *lcd, int digit, int position);
 void showBigNumberFixed(hd44780 *lcd, int value, byte minLength, int position);
 
 #endif

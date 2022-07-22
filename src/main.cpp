@@ -9,11 +9,14 @@
 #include <FS.h>
 #include <SPIFFS.h>
 #include <ArduinoJson.h>
+#include <esp_task_wdt.h>
 #include "SwitchRelay.h"
 #include "MotionSensor.h"
 #include "LcdFixedPositionPrint.h"
 #include "LcdMarqueeString.h"
 #include "LcdBigDigits.h"
+#include "LcdSymbolAlert.h"
+#include "LcdBigSymbolAlert.h"
 #include "time.h"
 #include "reset_info.h"
 #include "version.h"
@@ -76,11 +79,17 @@
 #define SWITCH_STATE_FILENAME         "/state.bin"
 #define SW_RESET_REASON_FILENAME      "/swresr.bin"
 
-#define GMT_OFFSET_SEC                2*60*60
+#define GMT_OFFSET_SEC                3*60*60
 #define DAYLIGHT_OFFSET_SEC           1*60*60
+
 #define NTP_SERVER                    "ua.pool.ntp.org"
+#define NTP_UPDATE_MS                 1*60000                                  // every 1 minute
 
 #define OTA_UPDATE_TIMEOUT_MILLIS     5*60000
+
+#define WDT_TIMEOUT_SEC               60
+
+typedef std::function<void(void)> ActionCallback;
 
 struct config_t {
   bool motion = true;
@@ -89,6 +98,7 @@ struct config_t {
   unsigned long wifi_reconnect_ms = WIFI_RECONNECT_MILLIS;
   unsigned long wifi_watchdog_ms = WIFI_WATCHDOG_MILLIS;
   unsigned int daylight_offset_sec = DAYLIGHT_OFFSET_SEC;
+  unsigned short wdt_timeout_sec = WDT_TIMEOUT_SEC;
 } Config;
 
 const String PubSubRestartControlTopic = String(MQTT_RESTART_CONTROL_TOPIC);
@@ -116,7 +126,7 @@ const PROGMEM uint8_t lcdCustomChars[8][8] = {
   { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x14 }, // 5: wifi < 15% (l)
   { 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x05, 0x15 }, // 6: wifi < 40% (l)
   { 0x00, 0x00, 0x00, 0x00, 0x10, 0x10, 0x10, 0x10 }, // 7: wifi < 55% (r)
-  { 0x00, 0x00, 0x01, 0x05, 0x15, 0x15, 0x15, 0x15 }  // 8:wifi < 85% (r)
+  { 0x00, 0x00, 0x01, 0x05, 0x15, 0x15, 0x15, 0x15 }  // 8: wifi < 85% (r)
 };
 
 SwitchRelay* switchRelays[SWITCH_RELAY_COUNT];
@@ -162,6 +172,13 @@ MotionSensor motionSensor(MOTION_SENSOR_PIN);
 LcdFixedPositionPrint meetingTextDisplay(&lcd, 2);
 LcdMarqueeString meetingTextControl(20);
 
+// LcdFixedPositionPrint hallAlertPrint(&lcd, 0, 18);
+LcdBigSymbolAlert hallAlert(&lcd, 10, 17);
+
+// LcdFixedPositionPrint entranceAlertPrint(&lcd, 0, 19);
+LcdBigSymbolAlert entranceAlert(&lcd, 11, 17);
+
+
 void restart(char code) {
   if (spiffsEnabled) {
     auto f = SPIFFS.open(SW_RESET_REASON_FILENAME, FILE_WRITE);
@@ -184,7 +201,7 @@ bool reconnectPubSub() {
   if (now - lastPubSubReconnectAttempt > MQTT_RECONNECT_MILLIS) {
     lastPubSubReconnectAttempt = now;
 
-    if (pubSubClient.connect(MQTT_CLIENT_ID, MQTT_USERNAME, MQTT_PASSWORD, MQTT_STATUS_TOPIC, MQTTQOS0, true, MQTT_STATUS_OFFLINE_MSG, false)) {
+    if (pubSubClient.connect(MQTT_CLIENT_ID, MQTT_USERNAME, MQTT_PASSWORD, MQTT_STATUS_TOPIC, MQTTQOS0, true, MQTT_STATUS_OFFLINE_MSG, true)) {
       pubSubClient.publish(MQTT_STATUS_TOPIC, MQTT_STATUS_ONLINE_MSG, true);
       pubSubClient.publish(MQTT_VERSION_TOPIC, VERSION, true);
       
@@ -193,6 +210,9 @@ bool reconnectPubSub() {
       pubSubClient.subscribe(MQTT_BACKLIGHT_TOPIC, MQTTQOS0);
       pubSubClient.subscribe(MQTT_CONFIG_TOPIC "/set", MQTTQOS0);
       pubSubClient.subscribe(MQTT_CURRENT_MEETING_TOPIC, MQTTQOS0);
+
+      pubSubClient.subscribe("loc/hall/motion", MQTTQOS0);
+      pubSubClient.subscribe("entrance/motion", MQTTQOS0);
 
       for (uint8_t i = 0; i < SWITCH_RELAY_COUNT; i++) {
         pubSubClient.subscribe(PubSubSwitchTopic[i].c_str(), MQTTQOS0);
@@ -203,12 +223,6 @@ bool reconnectPubSub() {
   }
 
   return false;
-}
-
-void pubSubClientLoop() {
-  if (!pubSubClient.connected() && !reconnectPubSub()) return;
-
-  pubSubClient.loop();
 }
 
 bool wifiLoop() {
@@ -328,6 +342,14 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
       meetingTextControl.setText(meeting);
     }
   }
+  else if (topicStr.equals("entrance/motion")) {
+    if (payload[0] == '1') entranceAlert.blink(5000);
+    // else entranceAlert.reset();
+  }
+  else if (topicStr.equals("loc/hall/motion")) {
+    if (payload[0] == '1') hallAlert.blink(5000);
+    // else hallAlert.reset();
+  }
 }
 
 void onMotionSensor() {
@@ -393,6 +415,8 @@ void otaProgress(unsigned int currentBytes, unsigned int totalBytes) {
 
   lcd.setCursor(0, 3);
   lcd.printf("%02d:%02d", minutes, seconds);
+
+  esp_task_wdt_reset();
 }
 
 void otaEnd() {
@@ -478,6 +502,7 @@ void setup() {
       Config.wifi_reconnect_ms = jdoc["wifi_reconnect_ms"] > 0 ? jdoc["wifi_reconnect_ms"] : WIFI_RECONNECT_MILLIS;
       Config.wifi_watchdog_ms = jdoc["wifi_watchdog_ms"] > 0 ? jdoc["wifi_watchdog_ms"] : WIFI_WATCHDOG_MILLIS;
       Config.daylight_offset_sec = jdoc["daylight_offset_sec"];
+      Config.wdt_timeout_sec = jdoc["wdt_timeout_sec"] > 0 ? jdoc["wdt_timeout_sec"] : WDT_TIMEOUT_SEC;
     }
 
     f.close();
@@ -491,9 +516,13 @@ void setup() {
     SPIFFS.remove(SW_RESET_REASON_FILENAME);
   }
 
+  // Setup WDT
+  esp_task_wdt_init(Config.wdt_timeout_sec, true);
+  esp_task_wdt_add(NULL);
+
   setupLcd();
 
-  setupAcDetector();
+  // setupAcDetector();
 
   if (Config.motion) {
     motionSensor.onChanged(onMotionSensor);
@@ -523,55 +552,26 @@ void setup() {
   lcd.noBacklight();
 }
 
-void loop() {
-  auto before = now;
-  now = millis();
+void onJustStarted() {
+    pubSubClient.publish(MQTT_CLIENT_ID "/restart_reason/0", get_reset_reason_info(reset_reason[0]).c_str(), true);
+    pubSubClient.publish(MQTT_CLIENT_ID "/restart_reason/1", get_reset_reason_info(reset_reason[1]).c_str(), true);
+    pubSubClient.publish(MQTT_CLIENT_ID "/restart_reason/sw", get_sw_reset_reason_info(sw_reset_reason).c_str(), true);
 
-  if (now - lastAcPublish > 1000) {
-    auto value = zc;
-    zc = 0;
-
-    pubSubClient.publish(MQTT_CLIENT_ID "/ac/count", String(value).c_str());
-    pubSubClient.publish(MQTT_CLIENT_ID "/ac/millis", String(now - lastAcPublish).c_str());
-
-    lastAcPublish = now;
-  }
-  
-  if (otaUpdateMode) {
-    if (now - otaUpdateStart > OTA_UPDATE_TIMEOUT_MILLIS) restart(RESET_ON_OTA_TIMEOUT);
+    String buf;
+    DynamicJsonDocument jdoc(256);
+    jdoc["backlight"] = Config.backlight;
+    jdoc["backlightTimeout"] = Config.backlightTimeout;
+    jdoc["motion"] = Config.motion;
+    jdoc["wifi_reconnect_ms"] = Config.wifi_reconnect_ms;
+    jdoc["wifi_watchdog_ms"] = Config.wifi_watchdog_ms;
+    jdoc["daylight_offset_sec"] = Config.daylight_offset_sec;
+    jdoc["wdt_timeout_sec"] = Config.wdt_timeout_sec;
     
-    ArduinoOTA.handle();
-    return;
-  }
+    serializeJson(jdoc, buf);
+    pubSubClient.publish(MQTT_CONFIG_TOPIC, buf.c_str(), true);
+}
 
-  if (Config.motion) {
-    motionSensor.loop();
-  }
-
-  if (now - lastMotionDetected > Config.backlightTimeout) {
-    setLcdBacklight(false);
-  }
-
-  if (!wifiLoop()) {
-    lcd.setCursor(0, 0);
-    lcd.print("NO WIFI CONNECTION!                     ");
-
-    lastClockDraw = 0;
-    return;
-  }
-
-  if (lastTimeConfig == 0 || now - lastTimeConfig > 30*60000) {
-    lastTimeConfig = now;
-    configTime(GMT_OFFSET_SEC, Config.daylight_offset_sec, NTP_SERVER);
-
-    if (!getAdjustedTime(&timeinfo)) {
-      lastTimeConfig = 0;
-    }
-    // else {
-    //   if (timeinfo.tm_isdst && timeinfo.tm_mon == 10 && timeinfo.tm_mday > 24 && timeinfo.)
-    // }
-  }
-
+void clock_loop(unsigned long now) {
   if (lastTimeConfig > 0 && now - lastClockDraw >= 1000) {
     if (lastClockDraw == 0) {
       lcd.setCursor(0, 0);
@@ -598,36 +598,20 @@ void loop() {
     lcd.setCursor(7, 1);
     lcd.print(clock_separator);
   }
+}
 
-  // if (now - lastWifiRSSI > 2000) {
-  //   lcd.setCursor(18, 0);
-  //   auto wifiQuality = 1+(WiFi.RSSI()+65)/15.;
-  //   if (wifiQuality <= 0.25) lcd.print("\4 ");
-  //   else if (wifiQuality <= 0.5) lcd.print("\5 ");
-  //   else if (wifiQuality <= 0.8) lcd.print("\5\6");
-  //   else lcd.print("\5\7");
-  // }
+void timeconfig_loop(unsigned long now) {
+  if (lastTimeConfig == 0 || now - lastTimeConfig > NTP_UPDATE_MS) {
+    lastTimeConfig = now;
+    configTime(GMT_OFFSET_SEC, Config.daylight_offset_sec, "0." NTP_SERVER, "1." NTP_SERVER, "2." NTP_SERVER);
 
-  pubSubClientLoop();
-
-  if (justStarted) {
-    justStarted = false;
-    justStarted |= !pubSubClient.publish(MQTT_CLIENT_ID "/restart_reason/0", get_reset_reason_info(reset_reason[0]).c_str(), true);
-    justStarted |= !pubSubClient.publish(MQTT_CLIENT_ID "/restart_reason/1", get_reset_reason_info(reset_reason[1]).c_str(), true);
-    justStarted |= !pubSubClient.publish(MQTT_CLIENT_ID "/restart_reason/sw", get_sw_reset_reason_info(sw_reset_reason).c_str(), true);
-
-    String buf;
-    DynamicJsonDocument jdoc(256);
-    jdoc["backlight"] = Config.backlight;
-    jdoc["backlightTimeout"] = Config.backlightTimeout;
-    jdoc["motion"] = Config.motion;
-    jdoc["wifi_reconnect_ms"] = Config.wifi_reconnect_ms;
-    jdoc["wifi_watchdog_ms"] = Config.wifi_watchdog_ms;
-    jdoc["daylight_offset_sec"] = Config.daylight_offset_sec;
-    serializeJson(jdoc, buf);
-    justStarted |= !pubSubClient.publish(MQTT_CONFIG_TOPIC, buf.c_str(), true);
+    if (!getAdjustedTime(&timeinfo)) {
+      lastTimeConfig = 0;
+    }
   }
+}
 
+void publish_state_loop() {
   if (needPublishCurrentState) {
     needPublishCurrentState = false;
 
@@ -640,7 +624,81 @@ void loop() {
     needPublishMotionState = !pubSubClient.publish(PubSubMotionStateTopic, motionSensor.getState() != None ? "1" : "0");
   }
 
+}
+
+void pubSubClientLoop() {
+  if (!pubSubClient.connected() && !reconnectPubSub()) return;
+
+  publish_state_loop();
+
+  pubSubClient.loop();
+}
+
+void ac_loop(unsigned long now) {
+  if (now - lastAcPublish > 1000) {
+    auto value = zc;
+    zc = 0;
+
+    pubSubClient.publish(MQTT_CLIENT_ID "/ac/count", String(value).c_str());
+    pubSubClient.publish(MQTT_CLIENT_ID "/ac/millis", String(now - lastAcPublish).c_str());
+
+    lastAcPublish = now;
+  }
+}
+
+void motion_loop() {
+  if (Config.motion) {
+    motionSensor.loop();
+  }
+
+  if (now - lastMotionDetected > Config.backlightTimeout) {
+    setLcdBacklight(false);
+  }
+}
+
+void ui_loop() {
   meetingTextControl.draw(&meetingTextDisplay);
+
+  hallAlert.draw();
+  entranceAlert.draw();
+}
+
+void loop() {
+  esp_task_wdt_reset();
+
+  auto before = now;
+  now = millis();
+  
+  if (otaUpdateMode) {
+    if (now - otaUpdateStart > OTA_UPDATE_TIMEOUT_MILLIS) restart(RESET_ON_OTA_TIMEOUT);
+    
+    ArduinoOTA.handle();
+    return;
+  }
+
+  // ac_loop(now);
+  motion_loop();
+
+  if (!wifiLoop()) {
+    if (lastClockDraw != 0) {
+      lcd.clear();
+      lcd.print("NO WIFI CONNECTION!");
+    }
+
+    lastClockDraw = 0;
+    return;
+  }
+
+  if (justStarted) {
+    justStarted = false;
+    onJustStarted();
+  }
+
+  timeconfig_loop(now);
+
+  clock_loop(now);
+  pubSubClientLoop();
+  ui_loop();
 
   ArduinoOTA.handle();
 }

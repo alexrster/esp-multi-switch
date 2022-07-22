@@ -12,8 +12,8 @@ const PROGMEM uint8_t glyphs[5][8]={
 };
 
 const int digitWidth = 3;
-const char bigDigitsTop[10][digitWidth]={CH_I(3),CH_I(0),CH_I(3), CH_I(0),CH_I(3),32,       CH_I(2),CH_I(2),CH_I(3), CH_I(0),CH_I(2),CH_I(3), CH_I(3),CH_I(1),CH_I(3),  CH_I(3),CH_I(2),CH_I(2), CH_I(3),CH_I(2),CH_I(2), CH_I(0),CH_I(0),CH_I(3),   CH_I(3),CH_I(2),CH_I(3),   CH_I(3),CH_I(2),CH_I(3)};
-const char bigDigitsBot[10][digitWidth]={CH_I(3),CH_I(1),CH_I(3), CH_I(1),CH_I(3),CH_I(1),  CH_I(3),CH_I(1),CH_I(1), CH_I(1),CH_I(1),CH_I(3), 32,32,CH_I(3),            CH_I(1),CH_I(1),CH_I(3), CH_I(3),CH_I(1),CH_I(3), 32,32,CH_I(3),             CH_I(3),CH_I(1),CH_I(3),   CH_I(1),CH_I(1),CH_I(3)};
+const char bigDigitsTop[12][digitWidth]={CH_I(3),CH_I(0),CH_I(3), CH_I(0),CH_I(3),32,       CH_I(2),CH_I(2),CH_I(3), CH_I(0),CH_I(2),CH_I(3), CH_I(3),CH_I(1),CH_I(3),  CH_I(3),CH_I(2),CH_I(2), CH_I(3),CH_I(2),CH_I(2), CH_I(0),CH_I(0),CH_I(3),   CH_I(3),CH_I(2),CH_I(3),   CH_I(3),CH_I(2),CH_I(3),  CH_I(3),CH_I(1),CH_I(3),  CH_I(3),CH_I(2),CH_I(0)};
+const char bigDigitsBot[12][digitWidth]={CH_I(3),CH_I(1),CH_I(3), CH_I(1),CH_I(3),CH_I(1),  CH_I(3),CH_I(1),CH_I(1), CH_I(1),CH_I(1),CH_I(3), 32,32,CH_I(3),            CH_I(1),CH_I(1),CH_I(3), CH_I(3),CH_I(1),CH_I(3), 32,32,CH_I(3),             CH_I(3),CH_I(1),CH_I(3),   CH_I(1),CH_I(1),CH_I(3),  CH_I(3),32,CH_I(3),       CH_I(3),CH_I(1),CH_I(1)};
 
 char buffer[12];  //used to convert a number into a string
 
@@ -36,7 +36,8 @@ void showBigDigit(hd44780 *lcd, int digit, int position)
 
 void showBigNumber(hd44780 *lcd, char* value, int position)
 {
-  for(int index = 0; index < 10; index++)
+  // setupBigDigit(lcd);
+  for(int index = 0; index < 12; index++)
   {
     char c = value[index];
     
