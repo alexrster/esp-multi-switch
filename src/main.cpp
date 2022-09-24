@@ -25,16 +25,18 @@
 #define LCD_PROGRESS_BAR_CHAR         0xff
 #define LCD_PROGRESS_BAR              "" LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR
 
-#define SWITCH_RELAY_COUNT            8
+#define SWITCH_RELAY_COUNT            10
 
 #define SWITCH_RELAY0_PIN             25
 #define SWITCH_RELAY1_PIN             32
 #define SWITCH_RELAY2_PIN             4
 #define SWITCH_RELAY3_PIN             2
-#define SWITCH_RELAY4_PIN             5
+#define SWITCH_RELAY4_PIN             16
 #define SWITCH_RELAY5_PIN             23
 #define SWITCH_RELAY6_PIN             19
 #define SWITCH_RELAY7_PIN             18
+#define SWITCH_RELAY8_PIN             17
+#define SWITCH_RELAY9_PIN             33
 
 #define MOTION_SENSOR_PIN             39
 
@@ -87,7 +89,8 @@
 
 #define OTA_UPDATE_TIMEOUT_MILLIS     5*60000
 
-#define WDT_TIMEOUT_SEC               10
+#define WDT_TIMEOUT_SEC               20
+#define UI_FORCED_REDRAW_MS           15*1000
 
 typedef std::function<void(void)> ActionCallback;
 
@@ -114,6 +117,8 @@ const String PubSubSwitchTopic[] = {
   MQTT_SWITCH_STATE_TOPIC(6),
   MQTT_SWITCH_STATE_TOPIC(7),
   MQTT_SWITCH_STATE_TOPIC(8),
+  MQTT_SWITCH_STATE_TOPIC(9),
+  MQTT_SWITCH_STATE_TOPIC(10),
 };
 
 const char* PubSubMotionStateTopic = "balcony/motion";
@@ -143,6 +148,7 @@ unsigned long
   lastTimeConfig = 0,
   lastClockDraw = 0,
   lastAcPublish = 0,
+  last_ui_redraw = 0,
   otaUpdateStart = 0;
 
 bool 
@@ -290,7 +296,7 @@ boolean parseBooleanMessage(byte* payload, unsigned int length, boolean defaultV
 
 void updateSwitchControlLcd() {
   lcd.setCursor(0, 3);
-  for (uint8_t i = 0; i < SWITCH_RELAY_COUNT; i++) {
+  for (uint8_t i = 0; i < 8; i++) {
     if (switchRelays[i]->getState() == On) {
       lcd.write(0);
       lcd.write(1);
@@ -472,6 +478,8 @@ void setup() {
   switchRelays[5] = new SwitchRelayPin(SWITCH_RELAY5_PIN, 0);
   switchRelays[6] = new SwitchRelayPin(SWITCH_RELAY6_PIN, 0);
   switchRelays[7] = new SwitchRelayPin(SWITCH_RELAY7_PIN, 0);
+  switchRelays[8] = new SwitchRelayPin(SWITCH_RELAY8_PIN, 0);
+  switchRelays[9] = new SwitchRelayPin(SWITCH_RELAY9_PIN, 0);
 
   if(spiffsEnabled && !SPIFFS.begin(true)){
     log_e("SPIFFS mount failed");
@@ -657,8 +665,12 @@ void motion_loop() {
 }
 
 void ui_loop() {
-  meetingTextControl.draw(&meetingTextDisplay);
+  if (now - last_ui_redraw > UI_FORCED_REDRAW_MS) {
+    last_ui_redraw = now;
+    updateSwitchControlLcd();
+  }
 
+  meetingTextControl.draw(&meetingTextDisplay);
   hallAlert.draw();
   entranceAlert.draw();
 }

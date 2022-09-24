@@ -27,10 +27,10 @@ class SwitchRelayPin : public SwitchRelay {
     SwitchRelayPin(uint8_t pin) : SwitchRelayPin(pin, 1)
     { }
 
-    SwitchRelayPin(uint8_t pin, uint8_t onValue)
+    SwitchRelayPin(uint8_t pin, uint8_t onValue, uint8_t pinModeType = OUTPUT)
       : pin(pin), onValue(onValue), offValue(onValue ? 0 : 1)
     { 
-      pinMode(pin, OUTPUT);
+      pinMode(pin, pinModeType);
       setState(state);
     }
 

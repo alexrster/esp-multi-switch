@@ -32,10 +32,15 @@ class LcdMarqueeString
 
     void draw(Print* out)
     {
-      if (!text_changed && text.length() <= 0) return;
+      draw(out, false);
+    }
+
+    void draw(Print* out, bool force)
+    {
+      if (!force && !text_changed && text.length() <= 0) return;
 
       now = millis();
-      if (text_changed || now - last_draw >= speed_ms) {
+      if (force || text_changed || now - last_draw >= speed_ms) {
         last_draw = now;
         text_changed = false;
 
