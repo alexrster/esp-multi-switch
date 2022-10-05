@@ -30,7 +30,7 @@
 #define SWITCH_RELAY0_PIN             25
 #define SWITCH_RELAY1_PIN             32
 #define SWITCH_RELAY2_PIN             4
-#define SWITCH_RELAY3_PIN             2
+#define SWITCH_RELAY3_PIN             13
 #define SWITCH_RELAY4_PIN             16
 #define SWITCH_RELAY5_PIN             23
 #define SWITCH_RELAY6_PIN             19
@@ -44,7 +44,7 @@
 #define INT_LED_PIN                   2
 #endif
 
-#define AC_DETECTOR_PIN               26
+#define BLINDS_ZERO_PIN               26
 
 #define APP_INIT_DELAY_MILLIS         2500
 
@@ -74,6 +74,8 @@
 #define MQTT_BACKLIGHT_TOPIC          MQTT_CLIENT_ID "/backlight"
 #define MQTT_CONFIG_TOPIC             MQTT_CLIENT_ID "/config"
 #define MQTT_CURRENT_MEETING_TOPIC    "ay/calendar/events/current/title"
+
+#define MQTT_BLINDS_ZERO_TOPIC        MQTT_CLIENT_ID "/blinds-zero"
 
 #define MQTT_STATUS_ONLINE_MSG        "online"
 #define MQTT_STATUS_OFFLINE_MSG       "offline"
@@ -148,7 +150,8 @@ unsigned long
   lastTimeConfig = 0,
   lastClockDraw = 0,
   lastAcPublish = 0,
-  last_ui_redraw = 0,
+  lastUiRedraw = 0,
+  lastBlindsRead = 0,
   otaUpdateStart = 0;
 
 bool 
@@ -156,7 +159,8 @@ bool
   needPublishMotionState = true,
   spiffsEnabled = true,
   justStarted = true,
-  otaUpdateMode = false;
+  otaUpdateMode = false,
+  lastBlindsZero = false;
 
 RESET_REASON
   reset_reason[2];
@@ -368,6 +372,11 @@ void onMotionSensor() {
   }
 }
 
+void IRAM_ATTR blindsZeroISR() {
+  lastBlindsZero = true;
+}
+
+#ifdef AC_DETECTOR
 unsigned long zc = 0;
 void IRAM_ATTR acDetectorISR() {
   zc++;
@@ -377,6 +386,7 @@ void setupAcDetector() {
   pinMode(AC_DETECTOR_PIN, INPUT);
   attachInterrupt(AC_DETECTOR_PIN, acDetectorISR, RISING);
 }
+#endif
 
 void setupLcd() {
   log_d("Initialize LCD display");
@@ -530,7 +540,9 @@ void setup() {
 
   setupLcd();
 
-  // setupAcDetector();
+#ifdef AC_DETECTOR
+  setupAcDetector();
+#endif
 
   if (Config.motion) {
     motionSensor.onChanged(onMotionSensor);
@@ -551,6 +563,9 @@ void setup() {
 
   pubSubClient.setCallback(onMqttMessage);
   pubSubClient.setServer(MQTT_SERVER_NAME, MQTT_SERVER_PORT);
+
+  pinMode(BLINDS_ZERO_PIN, INPUT_PULLUP);
+  // attachInterrupt(BLINDS_ZERO_PIN, blindsZeroISR, ONLOW);
 
   now = millis();
   lastWifiOnline = now;
@@ -642,6 +657,7 @@ void pubSubClientLoop() {
   pubSubClient.loop();
 }
 
+#ifdef AC_DETECTOR
 void ac_loop(unsigned long now) {
   if (now - lastAcPublish > 1000) {
     auto value = zc;
@@ -653,6 +669,7 @@ void ac_loop(unsigned long now) {
     lastAcPublish = now;
   }
 }
+#endif
 
 void motion_loop() {
   if (Config.motion) {
@@ -665,14 +682,30 @@ void motion_loop() {
 }
 
 void ui_loop() {
-  if (now - last_ui_redraw > UI_FORCED_REDRAW_MS) {
-    last_ui_redraw = now;
+  if (now - lastUiRedraw > UI_FORCED_REDRAW_MS) {
+    lastUiRedraw = now;
     updateSwitchControlLcd();
   }
 
   meetingTextControl.draw(&meetingTextDisplay);
   hallAlert.draw();
   entranceAlert.draw();
+}
+
+void blinds_loop() {
+  if (now - lastBlindsRead > 50) {
+    lastBlindsRead = now;
+
+    auto blindsZero = digitalRead(BLINDS_ZERO_PIN) == 0;
+    if (blindsZero != lastBlindsZero) {
+      lastBlindsZero = blindsZero;
+
+      pubSubClient.publish(MQTT_BLINDS_ZERO_TOPIC, blindsZero ? "1" : "0", false);
+    }
+
+    // setSwitchState(8, On);
+    // setSwitchState(9, On);
+  }
 }
 
 void loop() {
@@ -690,6 +723,7 @@ void loop() {
 
   // ac_loop(now);
   motion_loop();
+  blinds_loop();
 
   if (!wifiLoop()) {
     if (lastClockDraw != 0) {
