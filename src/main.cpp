@@ -10,6 +10,7 @@
 #include <SPIFFS.h>
 #include <ArduinoJson.h>
 #include <esp_task_wdt.h>
+#include <Preferences.h>
 #include "SwitchRelay.h"
 #include "MotionSensor.h"
 #include "LcdFixedPositionPrint.h"
@@ -152,7 +153,8 @@ unsigned long
   lastAcPublish = 0,
   lastUiRedraw = 0,
   lastBlindsRead = 0,
-  otaUpdateStart = 0;
+  otaUpdateStart = 0,
+  runCounter = 0;
 
 bool 
   needPublishCurrentState = true,
@@ -174,6 +176,7 @@ char
 
 struct tm timeinfo;
 
+Preferences preferences;
 WiFiClient wifiClient;
 PubSubClient pubSubClient(wifiClient);
 hd44780_I2Cexp lcd;
@@ -190,11 +193,16 @@ LcdBigSymbolAlert entranceAlert(&lcd, 11, 17);
 
 
 void restart(char code) {
-  if (spiffsEnabled) {
-    auto f = SPIFFS.open(SW_RESET_REASON_FILENAME, FILE_WRITE);
-    f.write(code);
-    f.close();
-  }
+  // if (spiffsEnabled) {
+  //   auto f = SPIFFS.open(SW_RESET_REASON_FILENAME, FILE_WRITE);
+  //   f.write(code);
+  //   f.flush();
+  //   f.close();
+  // }
+
+  preferences.putULong("SW_RESET_UPTIME", millis());
+  preferences.putUChar("SW_RESET_REASON", code);
+  preferences.end();
 
   delay(200);
   ESP.restart();
@@ -480,6 +488,10 @@ void setup() {
   reset_reason[0] = rtc_get_reset_reason(0);
   reset_reason[1] = rtc_get_reset_reason(1);
 
+  preferences.begin("multiswitch-01");
+  runCounter = preferences.getULong("__RUN_N", 0) + 1;
+  preferences.putULong("__RUN_N", runCounter);
+
   switchRelays[0] = new SwitchRelayPin(SWITCH_RELAY0_PIN, 0);
   switchRelays[1] = new SwitchRelayPin(SWITCH_RELAY1_PIN, 0);
   switchRelays[2] = new SwitchRelayPin(SWITCH_RELAY2_PIN, 0);
@@ -491,7 +503,7 @@ void setup() {
   switchRelays[8] = new SwitchRelayPin(SWITCH_RELAY8_PIN, 0);
   switchRelays[9] = new SwitchRelayPin(SWITCH_RELAY9_PIN, 0);
 
-  if(spiffsEnabled && !SPIFFS.begin(true)){
+  if(spiffsEnabled && !SPIFFS.begin(true)) {
     log_e("SPIFFS mount failed");
     spiffsEnabled = false;
   }
@@ -526,13 +538,15 @@ void setup() {
     f.close();
   }
 
-  if (spiffsEnabled && SPIFFS.exists(SW_RESET_REASON_FILENAME)) {
-    auto f = SPIFFS.open(SW_RESET_REASON_FILENAME);
-    sw_reset_reason = f.read();
-    f.close();
+  // if (spiffsEnabled && SPIFFS.exists(SW_RESET_REASON_FILENAME)) {
+  //   auto f = SPIFFS.open(SW_RESET_REASON_FILENAME);
+  //   sw_reset_reason = f.read();
+  //   f.close();
 
-    SPIFFS.remove(SW_RESET_REASON_FILENAME);
-  }
+  //   SPIFFS.remove(SW_RESET_REASON_FILENAME);
+  // }
+
+  sw_reset_reason = preferences.getUChar("SW_RESET_REASON");
 
   // Setup WDT
   esp_task_wdt_init(Config.wdt_timeout_sec, true);
@@ -570,15 +584,25 @@ void setup() {
   now = millis();
   lastWifiOnline = now;
 
+  lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print("READY!");
+  lcd.setCursor(0, 1);
+  lcd.print("RUN #");
+  lcd.print(runCounter);
+
+  delay(preferences.getUInt("RUN_N_MSG_MS", 1000));
   lcd.noBacklight();
 }
 
-void onJustStarted() {
-    pubSubClient.publish(MQTT_CLIENT_ID "/restart_reason/0", get_reset_reason_info(reset_reason[0]).c_str(), true);
-    pubSubClient.publish(MQTT_CLIENT_ID "/restart_reason/1", get_reset_reason_info(reset_reason[1]).c_str(), true);
-    pubSubClient.publish(MQTT_CLIENT_ID "/restart_reason/sw", get_sw_reset_reason_info(sw_reset_reason).c_str(), true);
+bool onJustStarted() {
+    bool result = true;
+    result &= pubSubClient.publish(MQTT_CLIENT_ID "/restart_reason/0", get_reset_reason_info(reset_reason[0]).c_str(), true);
+    result &= pubSubClient.publish(MQTT_CLIENT_ID "/restart_reason/1", get_reset_reason_info(reset_reason[1]).c_str(), true);
+    result &= pubSubClient.publish(MQTT_CLIENT_ID "/restart_reason/uptime", String(preferences.getULong("SW_RESET_UPTIME", 0)).c_str(), true);
+    result &= pubSubClient.publish(MQTT_CLIENT_ID "/restart_reason/code", String((uint8_t)sw_reset_reason).c_str(), true);
+    result &= pubSubClient.publish(MQTT_CLIENT_ID "/restart_reason/sw", get_sw_reset_reason_info(sw_reset_reason).c_str(), true);
+    result &= pubSubClient.publish(MQTT_CLIENT_ID "/restart_reason/run_id", String(runCounter-1).c_str(), true);
 
     String buf;
     DynamicJsonDocument jdoc(256);
@@ -591,7 +615,9 @@ void onJustStarted() {
     jdoc["wdt_timeout_sec"] = Config.wdt_timeout_sec;
     
     serializeJson(jdoc, buf);
-    pubSubClient.publish(MQTT_CONFIG_TOPIC, buf.c_str(), true);
+    result &= pubSubClient.publish(MQTT_CONFIG_TOPIC, buf.c_str(), true);
+
+    return result;
 }
 
 void clock_loop(unsigned long now) {
@@ -736,8 +762,7 @@ void loop() {
   }
 
   if (justStarted) {
-    justStarted = false;
-    onJustStarted();
+    justStarted = !onJustStarted();
   }
 
   timeconfig_loop(now);
