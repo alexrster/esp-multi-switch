@@ -211,7 +211,7 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     if (length > 0) {
       if (payload[0] == 'l') powerSourceDrawer.print("LINE");
       else if (payload[0] == 'b') powerSourceDrawer.print("BATT");
-      else if (payload[0] == 'g') powerSourceDrawer.print(" GEN");
+      else if (payload[0] == 'g') powerSourceDrawer.print("GENR");
       else powerSourceDrawer.print("   -");
     }
   }
