@@ -11,7 +11,9 @@
 #include <ArduinoJson.h>
 #include <esp_task_wdt.h>
 #include <Preferences.h>
+#include "app.h"
 #include "SwitchRelay.h"
+#include "SwitchController.h"
 #include "MotionSensor.h"
 #include "LcdFixedPositionPrint.h"
 #include "LcdMarqueeString.h"
@@ -22,81 +24,6 @@
 #include "time.h"
 #include "reset_info.h"
 #include "version.h"
-
-#define LCD_BACKLIGHT_TIMEOUT_MILLIS  15000
-#define LCD_PROGRESS_BAR_CHAR         0xff
-#define LCD_PROGRESS_BAR              "" LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR LCD_PROGRESS_BAR_CHAR
-
-#define SWITCH_RELAY_COUNT            10
-
-#define SWITCH_RELAY0_PIN             25
-#define SWITCH_RELAY1_PIN             32
-#define SWITCH_RELAY2_PIN             4
-#define SWITCH_RELAY3_PIN             13
-#define SWITCH_RELAY4_PIN             16
-#define SWITCH_RELAY5_PIN             23
-#define SWITCH_RELAY6_PIN             19
-#define SWITCH_RELAY7_PIN             18
-#define SWITCH_RELAY8_PIN             17
-#define SWITCH_RELAY9_PIN             33
-
-#define MOTION_SENSOR_PIN             39
-
-#ifndef INT_LED_PIN
-#define INT_LED_PIN                   2
-#endif
-
-#define BLINDS_ZERO_PIN               26
-
-#define APP_INIT_DELAY_MILLIS         2500
-
-#define WIFI_SSID                     "qx.zone"
-#define WIFI_PASSPHRASE               "1234Qwer-"
-#define WIFI_RECONNECT_MILLIS         10000
-#define WIFI_WATCHDOG_MILLIS          60000
-
-#ifndef WIFI_HOSTNAME
-#define WIFI_HOSTNAME                 "multiswitch-01"
-#endif
-
-#define MQTT_SERVER_NAME              "ns2.in.qx.zone"
-#define MQTT_SERVER_PORT              1883
-#define MQTT_USERNAME                 NULL
-#define MQTT_PASSWORD                 NULL
-#define MQTT_RECONNECT_MILLIS         5000
-
-#ifndef MQTT_CLIENT_ID
-#define MQTT_CLIENT_ID                WIFI_HOSTNAME
-#endif
-
-#define MQTT_STATUS_TOPIC             MQTT_CLIENT_ID "/status"
-#define MQTT_VERSION_TOPIC            MQTT_CLIENT_ID "/version"
-#define MQTT_RESTART_CONTROL_TOPIC    MQTT_CLIENT_ID "/restart"
-#define MQTT_SWITCH_STATE_TOPIC(x)    MQTT_CLIENT_ID "/" #x
-#define MQTT_BACKLIGHT_TOPIC          MQTT_CLIENT_ID "/backlight"
-#define MQTT_CONFIG_TOPIC             MQTT_CLIENT_ID "/config"
-#define MQTT_CURRENT_MEETING_TOPIC    "ay/calendar/events/current/title"
-
-#define MQTT_BLINDS_ZERO_TOPIC        MQTT_CLIENT_ID "/blinds-zero"
-
-#define MQTT_STATUS_ONLINE_MSG        "online"
-#define MQTT_STATUS_OFFLINE_MSG       "offline"
-
-#define SWITCH_STATE_FILENAME         "/state.bin"
-#define SW_RESET_REASON_FILENAME      "/swresr.bin"
-
-#define GMT_OFFSET_SEC                2*60*60
-#define DAYLIGHT_OFFSET_SEC           1*60*60
-
-#define NTP_SERVER                    "ua.pool.ntp.org"
-#define NTP_UPDATE_MS                 1*60000                                  // every 1 minute
-
-#define OTA_UPDATE_TIMEOUT_MILLIS     5*60000
-
-#define WDT_TIMEOUT_SEC               20
-#define UI_FORCED_REDRAW_MS           15*1000
-
-typedef std::function<void(void)> ActionCallback;
 
 struct config_t {
   bool motion = true;
@@ -112,33 +39,15 @@ const String PubSubRestartControlTopic = String(MQTT_RESTART_CONTROL_TOPIC);
 const String PubSubCurrentMeetingTopic = String(MQTT_CURRENT_MEETING_TOPIC);
 const String PubSubBacklightTopic = String(MQTT_BACKLIGHT_TOPIC);
 
-const String PubSubSwitchTopic[] = { 
-  MQTT_SWITCH_STATE_TOPIC(1), 
-  MQTT_SWITCH_STATE_TOPIC(2), 
-  MQTT_SWITCH_STATE_TOPIC(3), 
-  MQTT_SWITCH_STATE_TOPIC(4),
-  MQTT_SWITCH_STATE_TOPIC(5),
-  MQTT_SWITCH_STATE_TOPIC(6),
-  MQTT_SWITCH_STATE_TOPIC(7),
-  MQTT_SWITCH_STATE_TOPIC(8),
-  MQTT_SWITCH_STATE_TOPIC(9),
-  MQTT_SWITCH_STATE_TOPIC(10),
-};
-
-const char* PubSubMotionStateTopic = "balcony/motion";
-
-const PROGMEM uint8_t lcdCustomChars[8][8] = {
+const PROGMEM uint8_t lcdCustomChars[4][8] = {
   { 0x1F, 0x1F, 0x1E, 0x1E, 0x1F, 0x1F, 0x1F, 0x1F }, // 1: o
   { 0x1F, 0x1F, 0x1F, 0x07, 0x0F, 0x0F, 0x1F, 0x1F }, // 2: n
   { 0x1F, 0x10, 0x10, 0x11, 0x11, 0x10, 0x10, 0x1F }, // 3: left half-rect
-  { 0x1F, 0x01, 0x01, 0x11, 0x11, 0x01, 0x01, 0x1F }, // 4: right half-rect
-  { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x14 }, // 5: wifi < 15% (l)
-  { 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x05, 0x15 }, // 6: wifi < 40% (l)
-  { 0x00, 0x00, 0x00, 0x00, 0x10, 0x10, 0x10, 0x10 }, // 7: wifi < 55% (r)
-  { 0x00, 0x00, 0x01, 0x05, 0x15, 0x15, 0x15, 0x15 }  // 8: wifi < 85% (r)
+  { 0x1F, 0x01, 0x01, 0x11, 0x11, 0x01, 0x01, 0x1F }  // 4: right half-rect
 };
 
-SwitchRelay* switchRelays[SWITCH_RELAY_COUNT];
+RESET_REASON
+  reset_reason[2];
 
 unsigned long 
   now = 0,
@@ -160,13 +69,10 @@ unsigned long
 bool 
   needPublishCurrentState = true,
   needPublishMotionState = true,
-  spiffsEnabled = true,
   justStarted = true,
   otaUpdateMode = false,
-  lastBlindsZero = false;
-
-RESET_REASON
-  reset_reason[2];
+  lastBlindsZero = false,
+  spiffsEnabled = true;
 
 int
   lastTimeMin = -1;
@@ -185,33 +91,28 @@ MotionSensor motionSensor(MOTION_SENSOR_PIN);
 
 LcdFixedPositionPrint meetingTextDisplay(&lcd, 2);
 LcdMarqueeString meetingTextControl(20);
-
-// LcdFixedPositionPrint hallAlertPrint(&lcd, 0, 18);
 LcdBigSymbolAlert hallAlert(&lcd, 10, 17);
-
-// LcdFixedPositionPrint entranceAlertPrint(&lcd, 0, 19);
 LcdBigSymbolAlert entranceAlert(&lcd, 11, 17);
 
-LcdFixedPositionPrint powerSourceDisplay(&lcd, 0, 16);
-LcdFixedPositionPrint voltageDisplay(&lcd, 1, 16);
+LcdFixedPositionPrint powerSourceDrawerTextDisplay(&lcd, 0, 16);
+LcdPrintDrawer powerSourceDrawer(&powerSourceDrawerTextDisplay);
 
-LcdPrintDrawer powerSourceDrawer(&powerSourceDisplay);
-LcdPrintDrawer voltageDrawer(&voltageDisplay);
+LcdFixedPositionPrint voltageDrawerTextDisplay(&lcd, 1, 16);
+LcdPrintDrawer voltageDrawer(&voltageDrawerTextDisplay);
+
+LcdFixedPositionPrint switchControllerTextDisplay(&lcd, 3, 0);
 
 void restart(char code) {
-  // if (spiffsEnabled) {
-  //   auto f = SPIFFS.open(SW_RESET_REASON_FILENAME, FILE_WRITE);
-  //   f.write(code);
-  //   f.flush();
-  //   f.close();
-  // }
-
   preferences.putULong("SW_RESET_UPTIME", millis());
   preferences.putUChar("SW_RESET_REASON", code);
   preferences.end();
 
   delay(200);
   ESP.restart();
+}
+
+bool getSpiffsEnabled() {
+  return spiffsEnabled;
 }
 
 void setLcdBacklight(boolean state) {
@@ -241,9 +142,7 @@ bool reconnectPubSub() {
       pubSubClient.subscribe("dev/power-line/source", MQTTQOS0);
       pubSubClient.subscribe("dev/power-line/voltage", MQTTQOS0);
 
-      for (uint8_t i = 0; i < SWITCH_RELAY_COUNT; i++) {
-        pubSubClient.subscribe(PubSubSwitchTopic[i].c_str(), MQTTQOS0);
-      }
+      pubSubSwitchControllerSubscribe(&pubSubClient);
     }
     
     return pubSubClient.connected();
@@ -272,75 +171,14 @@ bool wifiLoop() {
   return true;
 }
 
-void saveSwitchState() {
-  if (!spiffsEnabled) 
-    return;
-
-  auto f = SPIFFS.open(SWITCH_STATE_FILENAME, FILE_WRITE);
-  for (uint8_t i = 0; i < SWITCH_RELAY_COUNT; i++) {
-    f.write(switchRelays[i]->getState() == On ? '1' : '0');
-  }
-  f.close();
-}
-
-void setSwitchState(uint8_t switchId, SwitchState_t newSwitchState, bool saveState = true) {
-  log_i("Set switch %d to %s", switchId, newSwitchState == On ? "ON" : "OFF");
-  switchRelays[switchId]->setState(newSwitchState);
-
-  if (saveState)
-    saveSwitchState();
-}
-
-boolean parseBooleanMessage(byte* payload, unsigned int length, boolean defaultValue = false) {
-  switch (length) {
-    case 1: 
-      switch (payload[0]) {
-        case '1': return true;
-        case '0': return false;
-        default: return defaultValue;
-      }
-      break;
-    case 2:
-    case 3:
-      switch (payload[1]) {
-        case 'n': return true;
-        case 'f': return false;
-      }
-      break;
-    case 4: return true;
-    case 5: return false;
-    default: return defaultValue;
-  }
-
-  return defaultValue;
-}
-
-void updateSwitchControlLcd() {
-  lcd.setCursor(0, 3);
-  for (uint8_t i = 0; i < 8; i++) {
-    if (switchRelays[i]->getState() == On) {
-      lcd.write(0);
-      lcd.write(1);
-    }
-    else {
-      lcd.print("\2\3");
-    }
-    if (i > 0 && (i+1)%4 == 0) lcd.print("  ");
-  }
-}
-
 void onMqttMessage(char* topic, byte* payload, unsigned int length) {
   if (length == 0) return;
   if (length > 255) return;
   log_d("Handle message from '%s':\n%s", topic, (char*)payload);
 
   String topicStr = topic;
-  for (uint8_t i = 0; i < SWITCH_RELAY_COUNT; i++) {
-    if (PubSubSwitchTopic[i] == topicStr) {
-      setSwitchState(i, parseBooleanMessage(payload, length, (switchRelays[i]->getState() == On)) ? On : Off);
-      updateSwitchControlLcd();
-      return;
-    }
+  if (pubSubSwitchControllerHandleMessage(topicStr, payload, length)) {
+    return;
   }
   
   if (PubSubBacklightTopic == topicStr) {
@@ -371,7 +209,7 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
   }
   else if (topicStr.equals("dev/power-line/source")) {
     if (length > 0) {
-      if (payload[0] == 'l')   powerSourceDrawer.print("LINE");
+      if (payload[0] == 'l') powerSourceDrawer.print("LINE");
       else if (payload[0] == 'b') powerSourceDrawer.print("BATT");
       else if (payload[0] == 'g') powerSourceDrawer.print(" GEN");
       else powerSourceDrawer.print("   -");
@@ -379,9 +217,11 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
   }
   else if (topicStr.equals("dev/power-line/voltage")) {
     if (length == 3) {
-      char voltage[3];
-      strncpy(voltage, (const char*)payload, 3);
-      voltageDrawer.printf("%sV", voltage);
+      char voltage[4];
+      memcpy(&voltage[1], payload, 3);
+      voltage[0] = 'V';
+
+      voltageDrawer.print(voltage);
     }
     else {
       voltageDrawer.print("   -");
@@ -407,11 +247,11 @@ void onMotionSensor() {
   }
 }
 
+#ifdef AC_DETECTOR
 void IRAM_ATTR blindsZeroISR() {
   lastBlindsZero = true;
 }
 
-#ifdef AC_DETECTOR
 unsigned long zc = 0;
 void IRAM_ATTR acDetectorISR() {
   zc++;
@@ -427,7 +267,7 @@ void setupLcd() {
   log_d("Initialize LCD display");
   lcd.begin(20, 4);
 
-	for(uint8_t i=0; i < 8; i++)
+	for(uint8_t i=0; i < 4; i++)
 		lcd.createChar(i, lcdCustomChars[i]);
 
   setupBigDigit(&lcd);
@@ -519,16 +359,7 @@ void setup() {
   runCounter = preferences.getULong("__RUN_N", 0) + 1;
   preferences.putULong("__RUN_N", runCounter);
 
-  switchRelays[0] = new SwitchRelayPin(SWITCH_RELAY0_PIN, 0);
-  switchRelays[1] = new SwitchRelayPin(SWITCH_RELAY1_PIN, 0);
-  switchRelays[2] = new SwitchRelayPin(SWITCH_RELAY2_PIN, 0);
-  switchRelays[3] = new SwitchRelayPin(SWITCH_RELAY3_PIN, 0);
-  switchRelays[4] = new SwitchRelayPin(SWITCH_RELAY4_PIN, 0);
-  switchRelays[5] = new SwitchRelayPin(SWITCH_RELAY5_PIN, 0);
-  switchRelays[6] = new SwitchRelayPin(SWITCH_RELAY6_PIN, 0);
-  switchRelays[7] = new SwitchRelayPin(SWITCH_RELAY7_PIN, 0);
-  switchRelays[8] = new SwitchRelayPin(SWITCH_RELAY8_PIN, 0);
-  switchRelays[9] = new SwitchRelayPin(SWITCH_RELAY9_PIN, 0);
+  setupSwitchController();
 
   if(spiffsEnabled && !SPIFFS.begin(true)) {
     log_e("SPIFFS mount failed");
@@ -541,7 +372,7 @@ void setup() {
     f.readBytes(b, SWITCH_RELAY_COUNT);
 
     for (uint8_t i = 0; i < SWITCH_RELAY_COUNT; i++) {
-      switchRelays[i]->setState(b[i] == '1' ? On : Off);
+      setSwitchState(i, b[i] == '1' ? On : Off, false);
     }
 
     f.close();
@@ -611,15 +442,18 @@ void setup() {
   now = millis();
   lastWifiOnline = now;
 
+  lcd.noLineWrap();
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print("READY!");
   lcd.setCursor(0, 1);
   lcd.print("RUN #");
   lcd.print(runCounter);
+  lcd.setCursor(0, 3);
+  lcd.print("VERSION: ");
+  lcd.print(VERSION_SHORT);
 
   delay(preferences.getUInt("RUN_N_MSG_MS", 1000));
-  lcd.noBacklight();
 }
 
 bool onJustStarted() {
@@ -651,7 +485,9 @@ void clock_loop(unsigned long now) {
   if (lastTimeConfig > 0 && now - lastClockDraw >= 1000) {
     if (lastClockDraw == 0) {
       lcd.setCursor(0, 0);
-      lcd.print("                                        ");
+      lcd.write("                    ");
+      lcd.setCursor(0, 1);
+      lcd.write("                    ");
       lastTimeMin = -1;
     }
 
@@ -670,9 +506,9 @@ void clock_loop(unsigned long now) {
 
     clock_separator = clock_separator == ' ' ? '.' : ' ';
     lcd.setCursor(7, 0);
-    lcd.print(clock_separator);
+    lcd.write(clock_separator);
     lcd.setCursor(7, 1);
-    lcd.print(clock_separator);
+    lcd.write(clock_separator);
   }
 }
 
@@ -689,15 +525,11 @@ void timeconfig_loop(unsigned long now) {
 
 void publish_state_loop() {
   if (needPublishCurrentState) {
-    needPublishCurrentState = false;
-
-    for (uint8_t i = 0; i < SWITCH_RELAY_COUNT; i++) {
-      needPublishCurrentState |= !pubSubClient.publish(PubSubSwitchTopic[i].c_str(), switchRelays[i]->getState() == On ? "1" : "0");
-    }
+    needPublishCurrentState = pubSubSwitchControllerPublishState(&pubSubClient);
   }
 
   if (needPublishMotionState) {
-    needPublishMotionState = !pubSubClient.publish(PubSubMotionStateTopic, motionSensor.getState() != None ? "1" : "0");
+    needPublishMotionState = !pubSubClient.publish("balcony/motion", motionSensor.getState() != None ? "1" : "0");
   }
 
 }
@@ -735,14 +567,14 @@ void motion_loop() {
 }
 
 void ui_loop() {
-  if (now - lastUiRedraw > UI_FORCED_REDRAW_MS) {
-    lastUiRedraw = now;
-    updateSwitchControlLcd();
-  }
+  if (now - lastUiRedraw < 150) return;
+  
+  lastUiRedraw = now;
 
+  drawSwitchControlLcd(&switchControllerTextDisplay);
   meetingTextControl.draw(&meetingTextDisplay);
-  hallAlert.draw();
-  entranceAlert.draw();
+  // hallAlert.draw();
+  // entranceAlert.draw();
   powerSourceDrawer.draw();
   voltageDrawer.draw();
 }
@@ -757,9 +589,6 @@ void blinds_loop() {
 
       pubSubClient.publish(MQTT_BLINDS_ZERO_TOPIC, blindsZero ? "1" : "0", false);
     }
-
-    // setSwitchState(8, On);
-    // setSwitchState(9, On);
   }
 }
 
@@ -796,9 +625,35 @@ void loop() {
 
   timeconfig_loop(now);
 
-  clock_loop(now);
   pubSubClientLoop();
+
+  clock_loop(now);
   ui_loop();
 
   ArduinoOTA.handle();
+}
+
+/* TOOLS */
+bool parseBooleanMessage(byte* payload, unsigned int length, boolean defaultValue) {
+  switch (length) {
+    case 1: 
+      switch (payload[0]) {
+        case '1': return true;
+        case '0': return false;
+        default: return defaultValue;
+      }
+      break;
+    case 2:
+    case 3:
+      switch (payload[1]) {
+        case 'n': return true;
+        case 'f': return false;
+      }
+      break;
+    case 4: return true;
+    case 5: return false;
+    default: return defaultValue;
+  }
+
+  return defaultValue;
 }

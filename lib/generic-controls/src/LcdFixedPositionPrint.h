@@ -19,7 +19,7 @@ class LcdFixedPositionPrint : public Print
     virtual size_t write(const uint8_t *buffer, size_t size)
     {
       lcd->setCursor(col, row);
-      return lcd->write(buffer, size);
+      return lcd->write((const char*)buffer, size);
     }
   
   private:

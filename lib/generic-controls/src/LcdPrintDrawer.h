@@ -6,31 +6,39 @@
 class LcdPrintDrawer : public Print
 {
   public:
-    LcdPrintDrawer(Print *out) : printOut(out)
-    { }
+    LcdPrintDrawer(Print *out, uint16_t bufSize = 4) : printOut(out)
+    {
+      text.reserve(bufSize);
+    }
 
     virtual size_t write(uint8_t v)
     {
-      text.clear();
-      text.concat(v);
+      text = v;
+
+      redraw = true;
       return text.length();
     }
 
     virtual size_t write(const uint8_t *buffer, size_t size)
     {
-      text.clear();
-      text.concat((const char*)buffer, size);
+      text = (const char*)buffer;
+
+      redraw = true;
       return text.length();
     }
 
     void draw()
     {
-      printOut->print(text.c_str());
+      if (!redraw) return;
+      redraw = false;
+
+      printOut->write((const uint8_t*)text.c_str(), (size_t)text.length());
     }
   
   private:
     Print *printOut;
     String text;
+    bool redraw = false;
 };
 
 #endif

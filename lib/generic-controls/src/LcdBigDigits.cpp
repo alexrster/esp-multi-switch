@@ -27,11 +27,11 @@ void showBigDigit(hd44780 *lcd, int digit, int position)
 {
   lcd->setCursor(position, 0);
   for(int i = 0; i < digitWidth; i++)
-    lcd->print(bigDigitsTop[digit][i]);
+    lcd->write(bigDigitsTop[digit][i]);
 
   lcd->setCursor(position, 1);
   for(int i = 0; i < digitWidth; i++)
-    lcd->print(bigDigitsBot[digit][i]);  
+    lcd->write(bigDigitsBot[digit][i]);  
 }
 
 void showBigNumber(hd44780 *lcd, char* value, int position)

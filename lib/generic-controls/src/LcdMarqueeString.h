@@ -45,7 +45,7 @@ class LcdMarqueeString
         text_changed = false;
 
         if (text.length() <= display_len) {
-          out->printf("%s%*c", text.c_str(), display_len - text.length(), ' ');       // left-side
+          out->printf("%s%*c", text, display_len - text.length(), ' ');       // left-side
           return;
         }
 
@@ -61,12 +61,12 @@ class LcdMarqueeString
         String buf = text.substring(left, left + len);
         if (buf.length() < display_len)
         {
-          if (current_offset >= text.length()) out->printf(str_format, buf.c_str());  // right-side
-          else out->printf("%s%*c", buf.c_str(), display_len - buf.length(), ' ');    // left-side
+          if (current_offset >= text.length()) out->printf(str_format, buf);  // right-side
+          else out->printf("%s%*c", buf, display_len - buf.length(), ' ');    // left-side
         }
         else
         {
-          out->print(buf.c_str());
+          out->print(buf);
         }
       }
     }
