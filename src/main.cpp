@@ -18,6 +18,7 @@
 #include "LcdBigDigits.h"
 #include "LcdSymbolAlert.h"
 #include "LcdBigSymbolAlert.h"
+#include "LcdPrintDrawer.h"
 #include "time.h"
 #include "reset_info.h"
 #include "version.h"
@@ -84,7 +85,7 @@
 #define SWITCH_STATE_FILENAME         "/state.bin"
 #define SW_RESET_REASON_FILENAME      "/swresr.bin"
 
-#define GMT_OFFSET_SEC                3*60*60
+#define GMT_OFFSET_SEC                2*60*60
 #define DAYLIGHT_OFFSET_SEC           1*60*60
 
 #define NTP_SERVER                    "ua.pool.ntp.org"
@@ -191,6 +192,11 @@ LcdBigSymbolAlert hallAlert(&lcd, 10, 17);
 // LcdFixedPositionPrint entranceAlertPrint(&lcd, 0, 19);
 LcdBigSymbolAlert entranceAlert(&lcd, 11, 17);
 
+LcdFixedPositionPrint powerSourceDisplay(&lcd, 0, 16);
+LcdFixedPositionPrint voltageDisplay(&lcd, 1, 16);
+
+LcdPrintDrawer powerSourceDrawer(&powerSourceDisplay);
+LcdPrintDrawer voltageDrawer(&voltageDisplay);
 
 void restart(char code) {
   // if (spiffsEnabled) {
@@ -229,8 +235,11 @@ bool reconnectPubSub() {
       pubSubClient.subscribe(MQTT_CONFIG_TOPIC "/set", MQTTQOS0);
       pubSubClient.subscribe(MQTT_CURRENT_MEETING_TOPIC, MQTTQOS0);
 
-      pubSubClient.subscribe("loc/hall/motion", MQTTQOS0);
-      pubSubClient.subscribe("entrance/motion", MQTTQOS0);
+      // pubSubClient.subscribe("loc/hall/motion", MQTTQOS0);
+      // pubSubClient.subscribe("entrance/motion", MQTTQOS0);
+
+      pubSubClient.subscribe("dev/power-line/source", MQTTQOS0);
+      pubSubClient.subscribe("dev/power-line/voltage", MQTTQOS0);
 
       for (uint8_t i = 0; i < SWITCH_RELAY_COUNT; i++) {
         pubSubClient.subscribe(PubSubSwitchTopic[i].c_str(), MQTTQOS0);
@@ -358,6 +367,24 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
       meeting[l] = 0;
 
       meetingTextControl.setText(meeting);
+    }
+  }
+  else if (topicStr.equals("dev/power-line/source")) {
+    if (length > 0) {
+      if (payload[0] == 'l')   powerSourceDrawer.print("LINE");
+      else if (payload[0] == 'b') powerSourceDrawer.print("BATT");
+      else if (payload[0] == 'g') powerSourceDrawer.print(" GEN");
+      else powerSourceDrawer.print("   -");
+    }
+  }
+  else if (topicStr.equals("dev/power-line/voltage")) {
+    if (length == 3) {
+      char voltage[3];
+      strncpy(voltage, (const char*)payload, 3);
+      voltageDrawer.printf("%sV", voltage);
+    }
+    else {
+      voltageDrawer.print("   -");
     }
   }
   else if (topicStr.equals("entrance/motion")) {
@@ -716,6 +743,8 @@ void ui_loop() {
   meetingTextControl.draw(&meetingTextDisplay);
   hallAlert.draw();
   entranceAlert.draw();
+  powerSourceDrawer.draw();
+  voltageDrawer.draw();
 }
 
 void blinds_loop() {
