@@ -97,10 +97,15 @@ LcdPrintDrawer powerSourceDrawer(&powerSourceDrawerTextDisplay);
 LcdFixedPositionPrint voltageDrawerTextDisplay(&lcd, 1, 16);
 LcdPrintDrawer voltageDrawer(&voltageDrawerTextDisplay);
 
+LcdFixedPositionPrint batteryLevelDrawerTextDisplay(&lcd, 1, 16);
+LcdPrintDrawer batteryLevelDrawer(&batteryLevelDrawerTextDisplay);
+
 LcdFixedPositionPrint currentDrawerTextDisplay(&lcd, 3, 16);
 LcdPrintDrawer currentDrawer(&currentDrawerTextDisplay);
 
 LcdFixedPositionPrint switchControllerTextDisplay(&lcd, 3, 0);
+
+LcdPrintDrawer *voltageOrBatteryLevelDrawer = &voltageDrawer;
 
 void restart(char code) {
   preferences.putULong("SW_RESET_UPTIME", millis());
@@ -142,6 +147,7 @@ bool reconnectPubSub() {
       pubSubClient.subscribe("dev/power-line/source", MQTTQOS0);
       pubSubClient.subscribe("dev/power-line/voltage", MQTTQOS0);
       pubSubClient.subscribe("dev/power-line/current", MQTTQOS0);
+      pubSubClient.subscribe("dev/esp32-ups-01/battery/percent/int", MQTTQOS0);
 
       pubSubSwitchControllerSubscribe(&pubSubClient);
     }
@@ -210,10 +216,22 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
   }
   else if (topicStr.equals("dev/power-line/source")) {
     if (length > 0) {
-      if (payload[0] == 'l') powerSourceDrawer.print("LINE");
-      else if (payload[0] == 'b') powerSourceDrawer.print("BATT");
-      else if (payload[0] == 'g') powerSourceDrawer.print("GENR");
-      else powerSourceDrawer.print("   -");
+      if (payload[0] == 'l') {
+        powerSourceDrawer.print("LINE");
+        voltageOrBatteryLevelDrawer = &voltageDrawer;
+      }
+      else if (payload[0] == 'g') {
+        powerSourceDrawer.print("GENR");
+        voltageOrBatteryLevelDrawer = &voltageDrawer;
+      }
+      else if (payload[0] == 'b') {
+        powerSourceDrawer.print("BATT");
+        voltageOrBatteryLevelDrawer = &batteryLevelDrawer;
+      }
+      else {
+        powerSourceDrawer.print("   -");
+        voltageOrBatteryLevelDrawer = &voltageDrawer;
+      }
     }
   }
   else if (topicStr.equals("dev/power-line/voltage")) {
@@ -221,7 +239,6 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     if (length == 3) {
       memcpy(voltage, payload, 3);
     }
-
     voltageDrawer.print(voltage);
   }
   else if (topicStr.equals("dev/power-line/current")) {
@@ -229,8 +246,14 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     if (length > 0 && length <= 3) {
       memcpy(current, payload, length);
     }
-
     currentDrawer.print(current);
+  }
+  else if (topicStr.equals("dev/esp32-ups-01/battery/percent/int")) {
+    char percent[4] = {'-', ' ', ' ', '%'};
+    if (length > 0 && length <= 3) {
+      memcpy(percent, payload, length);
+    }
+    batteryLevelDrawer.print(percent);
   }
   else if (topicStr.equals("entrance/motion")) {
     if (payload[0] == '1') entranceAlert.blink(5000);
@@ -580,7 +603,7 @@ void ui_loop() {
   // hallAlert.draw();
   // entranceAlert.draw();
   powerSourceDrawer.draw();
-  voltageDrawer.draw();
+  voltageOrBatteryLevelDrawer->draw();
   currentDrawer.draw();
 
   clock_loop(now);
