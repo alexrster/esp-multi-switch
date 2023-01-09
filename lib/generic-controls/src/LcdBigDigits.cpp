@@ -15,8 +15,6 @@ const int digitWidth = 3;
 const char bigDigitsTop[12][digitWidth]={CH_I(3),CH_I(0),CH_I(3), CH_I(0),CH_I(3),32,       CH_I(2),CH_I(2),CH_I(3), CH_I(0),CH_I(2),CH_I(3), CH_I(3),CH_I(1),CH_I(3),  CH_I(3),CH_I(2),CH_I(2), CH_I(3),CH_I(2),CH_I(2), CH_I(0),CH_I(0),CH_I(3),   CH_I(3),CH_I(2),CH_I(3),   CH_I(3),CH_I(2),CH_I(3),  CH_I(3),CH_I(1),CH_I(3),  CH_I(3),CH_I(2),CH_I(0)};
 const char bigDigitsBot[12][digitWidth]={CH_I(3),CH_I(1),CH_I(3), CH_I(1),CH_I(3),CH_I(1),  CH_I(3),CH_I(1),CH_I(1), CH_I(1),CH_I(1),CH_I(3), 32,32,CH_I(3),            CH_I(1),CH_I(1),CH_I(3), CH_I(3),CH_I(1),CH_I(3), 32,32,CH_I(3),             CH_I(3),CH_I(1),CH_I(3),   CH_I(1),CH_I(1),CH_I(3),  CH_I(3),32,CH_I(3),       CH_I(3),CH_I(1),CH_I(1)};
 
-char buffer[12];  //used to convert a number into a string
-
 void setupBigDigit(hd44780 *lcd)
 {
   for(int i=0; i<4; i++)
@@ -36,7 +34,6 @@ void showBigDigit(hd44780 *lcd, int digit, int position)
 
 void showBigNumber(hd44780 *lcd, char* value, int position)
 {
-  // setupBigDigit(lcd);
   for(int index = 0; index < 12; index++)
   {
     char c = value[index];
@@ -49,16 +46,15 @@ void showBigNumber(hd44780 *lcd, char* value, int position)
   }  
 }
 
-void showBigNumber(hd44780 *lcd, int value, int position)
-{
-  itoa(value, buffer, 10);
-  showBigNumber(lcd, buffer, position);
-}
-
 void showBigNumberFixed(hd44780 *lcd, int value, byte minLength, int position)
 {
-  char format[8];
-  sprintf(format, "%%0%dd", minLength);
-  sprintf(buffer, format, value);
+  char format[20];
+  char buffer[20];  //used to convert a number into a string
+  auto n = sprintf(format, "%%0%dd", minLength);
+  format[n] = 0;
+
+  n = sprintf(buffer, format, value);
+  buffer[n] = 0;
+  
   showBigNumber(lcd, buffer, position);
 }

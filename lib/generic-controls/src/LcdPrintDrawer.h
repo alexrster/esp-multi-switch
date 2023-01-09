@@ -6,9 +6,9 @@
 class LcdPrintDrawer : public Print
 {
   public:
-    LcdPrintDrawer(Print *out, uint16_t bufSize = 4) : printOut(out)
+    LcdPrintDrawer(Print *out, uint16_t maxLength = 4) : printOut(out), maxLength(maxLength)
     {
-      text.reserve(bufSize);
+      text.reserve(maxLength);
     }
 
     virtual size_t write(uint8_t v)
@@ -32,11 +32,12 @@ class LcdPrintDrawer : public Print
       if (!redraw) return;
       redraw = false;
 
-      printOut->write((const uint8_t*)text.c_str(), (size_t)text.length());
+      printOut->write(text.c_str(), text.length() >= maxLength ? maxLength : text.length());
     }
   
   private:
     Print *printOut;
+    uint16_t maxLength;
     String text;
     bool redraw = false;
 };

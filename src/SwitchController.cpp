@@ -18,7 +18,7 @@ const String PubSubSwitchTopic[] = {
   MQTT_SWITCH_STATE_TOPIC(10),
 };
 
-char switchControlLcdBuf[18];
+char switchControlLcdBuf[18] = {' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' '};
 bool switchControlLcdBufReady = false;
 
 void setupSwitchController() {
@@ -75,7 +75,7 @@ bool pubSubSwitchControllerHandleMessage(String topicStr, byte* payload, unsigne
       auto target = parseBooleanMessage(payload, length, (actual == On)) ? On : Off;
       
       if (actual != target) {
-        setSwitchState(i, target);
+        setSwitchState(i, target, true);
         switchControlLcdBufReady = false;
       }
       
@@ -98,14 +98,14 @@ void drawSwitchControlLcd(Print *out) {
         switchControlLcdBuf[2*i+k] = 2;
         switchControlLcdBuf[2*i+1+k] = 3;
       }
-      if (i == 3) {
-        switchControlLcdBuf[8] = switchControlLcdBuf[9] = ' ';
-        k = 2;
-      }
+      // if (i == 3) {
+      //   switchControlLcdBuf[8] = switchControlLcdBuf[9] = ' ';
+      //   k = 2;
+      // }
     }
 
     switchControlLcdBufReady = true;
-  }
 
-  out->write(switchControlLcdBuf, 18);
+    out->write(switchControlLcdBuf, 16);
+  }
 }

@@ -35,10 +35,6 @@ struct config_t {
   unsigned short wdt_timeout_sec = WDT_TIMEOUT_SEC;
 } Config;
 
-const String PubSubRestartControlTopic = String(MQTT_RESTART_CONTROL_TOPIC);
-const String PubSubCurrentMeetingTopic = String(MQTT_CURRENT_MEETING_TOPIC);
-const String PubSubBacklightTopic = String(MQTT_BACKLIGHT_TOPIC);
-
 const PROGMEM uint8_t lcdCustomChars[4][8] = {
   { 0x1F, 0x1F, 0x1E, 0x1E, 0x1F, 0x1F, 0x1F, 0x1F }, // 1: o
   { 0x1F, 0x1F, 0x1F, 0x07, 0x0F, 0x0F, 0x1F, 0x1F }, // 2: n
@@ -63,6 +59,7 @@ unsigned long
   lastAcPublish = 0,
   lastUiRedraw = 0,
   lastBlindsRead = 0,
+  lastOtaHandle = 0,
   otaUpdateStart = 0,
   runCounter = 0;
 
@@ -99,6 +96,9 @@ LcdPrintDrawer powerSourceDrawer(&powerSourceDrawerTextDisplay);
 
 LcdFixedPositionPrint voltageDrawerTextDisplay(&lcd, 1, 16);
 LcdPrintDrawer voltageDrawer(&voltageDrawerTextDisplay);
+
+LcdFixedPositionPrint currentDrawerTextDisplay(&lcd, 3, 16);
+LcdPrintDrawer currentDrawer(&currentDrawerTextDisplay);
 
 LcdFixedPositionPrint switchControllerTextDisplay(&lcd, 3, 0);
 
@@ -141,6 +141,7 @@ bool reconnectPubSub() {
 
       pubSubClient.subscribe("dev/power-line/source", MQTTQOS0);
       pubSubClient.subscribe("dev/power-line/voltage", MQTTQOS0);
+      pubSubClient.subscribe("dev/power-line/current", MQTTQOS0);
 
       pubSubSwitchControllerSubscribe(&pubSubClient);
     }
@@ -181,7 +182,7 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     return;
   }
   
-  if (PubSubBacklightTopic == topicStr) {
+  if (topicStr.equals(MQTT_BACKLIGHT_TOPIC)) {
     setLcdBacklight(parseBooleanMessage(payload, length));
   }
   else if (topicStr.equals(MQTT_CONFIG_TOPIC "/set")) {
@@ -192,10 +193,10 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     restart(RESET_ON_CONFIG_UPDATE);
     return;
   }
-  else if (PubSubRestartControlTopic == topicStr) {
+  else if (topicStr.equals(MQTT_RESTART_CONTROL_TOPIC)) {
     restart(RESET_ON_MQTT_RESET_TOPIC);
   }
-  else if (PubSubCurrentMeetingTopic == topicStr) {
+  else if (topicStr.equals(MQTT_CURRENT_MEETING_TOPIC)) {
     if (now - lastMeetingNameUpdate > 5000) {
       lastMeetingNameUpdate = now;
       
@@ -216,16 +217,20 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     }
   }
   else if (topicStr.equals("dev/power-line/voltage")) {
+    char voltage[4] = {'-', ' ', ' ', 'V'};
     if (length == 3) {
-      char voltage[4];
-      memcpy(&voltage[1], payload, 3);
-      voltage[0] = 'V';
+      memcpy(voltage, payload, 3);
+    }
 
-      voltageDrawer.print(voltage);
+    voltageDrawer.print(voltage);
+  }
+  else if (topicStr.equals("dev/power-line/current")) {
+    char current[4] = {'-', ' ', ' ', 'A'};
+    if (length > 0 && length <= 3) {
+      memcpy(current, payload, length);
     }
-    else {
-      voltageDrawer.print("   -");
-    }
+
+    currentDrawer.print(current);
   }
   else if (topicStr.equals("entrance/motion")) {
     if (payload[0] == '1') entranceAlert.blink(5000);
@@ -265,14 +270,18 @@ void setupAcDetector() {
 
 void setupLcd() {
   log_d("Initialize LCD display");
-  lcd.begin(20, 4);
 
-	for(uint8_t i=0; i < 4; i++)
-		lcd.createChar(i, lcdCustomChars[i]);
+  // lcd.setExecTimes(hd44780::HD44780_CHEXECTIME, 37);
+  lcd.begin(20, 4);
+  lcd.setExecTimes(1520, 37);
+
+  for(uint8_t i=0; i < 4; i++)
+    lcd.createChar(i, lcdCustomChars[i]);
 
   setupBigDigit(&lcd);
 
   setLcdBacklight(true);
+  
   lcd.home();
   lcd.print(WIFI_HOSTNAME);
 }
@@ -442,10 +451,6 @@ void setup() {
   now = millis();
   lastWifiOnline = now;
 
-  lcd.noLineWrap();
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("READY!");
   lcd.setCursor(0, 1);
   lcd.print("RUN #");
   lcd.print(runCounter);
@@ -495,11 +500,16 @@ void clock_loop(unsigned long now) {
 
     if (lastTimeConfig != now) {
       timeinfo.tm_sec += 1;
-      mktime(&timeinfo);
+      if (timeinfo.tm_sec == 60 || timeinfo.tm_sec == 0)
+        mktime(&timeinfo);
     }
 
     if (timeinfo.tm_min != lastTimeMin) {
       lastTimeMin = timeinfo.tm_min;
+      lcd.setCursor(0, 0);
+      // lcd.write("                ");
+      lcd.setCursor(0, 1);
+      // lcd.write("                ");
       showBigNumberFixed(&lcd, timeinfo.tm_hour, 2, 0);
       showBigNumberFixed(&lcd, timeinfo.tm_min, 2, 8);
     }
@@ -523,7 +533,9 @@ void timeconfig_loop(unsigned long now) {
   }
 }
 
-void publish_state_loop() {
+void pubSubClientLoop() {
+  if (!pubSubClient.connected() && !reconnectPubSub()) return;
+
   if (needPublishCurrentState) {
     needPublishCurrentState = pubSubSwitchControllerPublishState(&pubSubClient);
   }
@@ -531,13 +543,6 @@ void publish_state_loop() {
   if (needPublishMotionState) {
     needPublishMotionState = !pubSubClient.publish("balcony/motion", motionSensor.getState() != None ? "1" : "0");
   }
-
-}
-
-void pubSubClientLoop() {
-  if (!pubSubClient.connected() && !reconnectPubSub()) return;
-
-  publish_state_loop();
 
   pubSubClient.loop();
 }
@@ -568,7 +573,6 @@ void motion_loop() {
 
 void ui_loop() {
   if (now - lastUiRedraw < 150) return;
-  
   lastUiRedraw = now;
 
   drawSwitchControlLcd(&switchControllerTextDisplay);
@@ -577,6 +581,9 @@ void ui_loop() {
   // entranceAlert.draw();
   powerSourceDrawer.draw();
   voltageDrawer.draw();
+  currentDrawer.draw();
+
+  clock_loop(now);
 }
 
 void blinds_loop() {
@@ -624,13 +631,13 @@ void loop() {
   }
 
   timeconfig_loop(now);
-
   pubSubClientLoop();
-
-  clock_loop(now);
   ui_loop();
 
-  ArduinoOTA.handle();
+  if (now - lastOtaHandle > 2000) {
+    lastOtaHandle = now;
+    ArduinoOTA.handle();
+  }
 }
 
 /* TOOLS */
