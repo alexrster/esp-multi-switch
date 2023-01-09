@@ -86,8 +86,9 @@ PubSubClient pubSubClient(wifiClient);
 hd44780_I2Cexp lcd;
 MotionSensor motionSensor(MOTION_SENSOR_PIN);
 
-LcdFixedPositionPrint meetingTextDisplay(&lcd, 2);
+LcdFixedPositionPrint meetingTextDisplay(&lcd, 2, 0);
 LcdMarqueeString meetingTextControl(20);
+
 LcdBigSymbolAlert hallAlert(&lcd, 10, 17);
 LcdBigSymbolAlert entranceAlert(&lcd, 11, 17);
 
@@ -242,9 +243,10 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     voltageDrawer.print(voltage);
   }
   else if (topicStr.equals("dev/power-line/current")) {
-    char current[4] = {'-', ' ', ' ', 'A'};
+    char current[4] = {' ', ' ', ' ', ' '};
     if (length > 0 && length <= 3) {
-      memcpy(current, payload, length);
+      memcpy(&current[3-length], payload, length);
+      current[3] = 'A';
     }
     currentDrawer.print(current);
   }

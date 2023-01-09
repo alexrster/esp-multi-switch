@@ -9,19 +9,19 @@ class LcdMarqueeString
   public:
     LcdMarqueeString(uint8_t display_len, uint16_t speed_ms = 330) : display_len(display_len), speed_ms(speed_ms)
     {
-      auto n = sprintf(str_format, "%%%us", display_len);
-      str_format[n] = 0;
+      sprintf(str_format_right, "%%%us", display_len);
+      sprintf(str_format_left, "%%-%us", display_len);
 
-      textRenderBuffer = (char *)malloc(sizeof(char) * (display_len + 1));
+      textRenderBuffer = (char *)malloc(sizeof(char) * display_len);
     }
 
     void setText(String text)
     {
-      if (text == this->text) return;
+      if (this->text.equals(text)) return;
 
       if (text.length() > 0)
       {
-        this->text = text;
+        this->text = text.c_str();
         setInitialOffset();
       }
       else
@@ -47,10 +47,13 @@ class LcdMarqueeString
         last_draw = now;
         text_changed = false;
 
-        if (text.length() <= display_len) {
-          auto n = snprintf(textRenderBuffer, display_len, "%s%*c", text.c_str(), display_len - text.length(), ' ');
-          writeTextRenderBuffer(out, n);
+        if (text.length() == 0) {
+          writeTextRenderBuffer(out, snprintf(textRenderBuffer, display_len, str_format_left, " "));
+          return;
+        }
 
+        if (text.length() <= display_len) {
+          writeTextRenderBuffer(out, snprintf(textRenderBuffer, display_len, str_format_left, text.c_str()));
           return;
         }
 
@@ -63,16 +66,14 @@ class LcdMarqueeString
         int left = current_offset >= text.length() ? 0 : text.length() - current_offset;
         int len = current_offset >= text.length() ? display_len + text.length() - current_offset : display_len;
 
-        String buf = text.substring(left, left + len);
+        String buf = text.substring(left, left + len - 1);
         if (buf.length() < display_len)
         {
           if (current_offset >= text.length()) {    // right-side
-            auto n = snprintf(textRenderBuffer, display_len, str_format, buf.c_str());
-            writeTextRenderBuffer(out, n);
+            writeTextRenderBuffer(out, snprintf(textRenderBuffer, display_len, str_format_right, buf.c_str()));
           }
           else {                                    // left-side
-            auto n = snprintf(textRenderBuffer, display_len, "%s%*c", buf.c_str(), display_len - buf.length(), ' ');
-            writeTextRenderBuffer(out, n);
+            writeTextRenderBuffer(out, snprintf(textRenderBuffer, display_len, str_format_left, buf.c_str()));
           }
         }
         else
@@ -87,16 +88,16 @@ class LcdMarqueeString
     uint16_t speed_ms;
     int current_offset = 0;
     long now, last_draw = 0;
-    char str_format[5] = { 0, 0, 0, 0, 0 };
     bool text_changed = false;
     String text = emptyString;
     char *textRenderBuffer;
+    char str_format_left[5] = {0,0,0,0,0};
+    char str_format_right[4] = {0,0,0,0};
 
     inline size_t writeTextRenderBuffer(Print* out, int n)
     {
       n = n < 0 ? 0 : n > display_len ? display_len : n;
       if (n > 0) {
-        textRenderBuffer[n] = 0;
 #ifdef DEBUG
         auto writtenBytes = out->write(textRenderBuffer, n);
         if (writtenBytes != n) {
