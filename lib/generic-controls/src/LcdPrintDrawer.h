@@ -6,7 +6,7 @@
 class LcdPrintDrawer : public Print
 {
   public:
-    LcdPrintDrawer(Print *out, uint16_t maxLength = 4) : printOut(out), maxLength(maxLength)
+    LcdPrintDrawer(uint16_t maxLength = 4) : maxLength(maxLength)
     {
       text.reserve(maxLength);
     }
@@ -27,16 +27,15 @@ class LcdPrintDrawer : public Print
       return text.length();
     }
 
-    void draw()
+    void draw(Print *out)
     {
       if (!redraw) return;
       redraw = false;
 
-      printOut->write(text.c_str(), text.length() >= maxLength ? maxLength : text.length());
+      out->write(text.c_str(), text.length() >= maxLength ? maxLength : text.length());
     }
   
   private:
-    Print *printOut;
     uint16_t maxLength;
     String text;
     bool redraw = false;

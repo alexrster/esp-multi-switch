@@ -16,6 +16,7 @@
 #include "SwitchController.h"
 #include "MotionSensor.h"
 #include "LcdFixedPositionPrint.h"
+#include "LcdFixedPositionVerticalPrint.h"
 #include "LcdMarqueeString.h"
 #include "LcdBigDigits.h"
 #include "LcdSymbolAlert.h"
@@ -69,6 +70,7 @@ bool
   justStarted = true,
   otaUpdateMode = false,
   lastBlindsZero = false,
+  showCurrent = false,
   spiffsEnabled = true;
 
 int
@@ -87,26 +89,29 @@ hd44780_I2Cexp lcd;
 MotionSensor motionSensor(MOTION_SENSOR_PIN);
 
 LcdFixedPositionPrint meetingTextDisplay(&lcd, 2, 0);
-LcdMarqueeString meetingTextControl(20);
+LcdMarqueeString meetingTextControl(15);
 
 LcdBigSymbolAlert hallAlert(&lcd, 10, 17);
 LcdBigSymbolAlert entranceAlert(&lcd, 11, 17);
 
-LcdFixedPositionPrint powerSourceDrawerTextDisplay(&lcd, 0, 16);
-LcdPrintDrawer powerSourceDrawer(&powerSourceDrawerTextDisplay);
+LcdPrintDrawer 
+  powerSourceDrawer,
+  voltageDrawer,
+  batteryLevelDrawer,
+  currentDrawer,
+  splitterDrawer,
+  *voltageOrBatteryLevelDrawer = &voltageDrawer;
 
-LcdFixedPositionPrint voltageDrawerTextDisplay(&lcd, 1, 16);
-LcdPrintDrawer voltageDrawer(&voltageDrawerTextDisplay);
+LcdFixedPositionPrint 
+  powerSourceDrawerTextDisplay(&lcd, 0, 16),
+  voltageDrawerTextDisplay(&lcd, 1, 16),
+  batteryLevelDrawerTextDisplay(&lcd, 1, 16),
+  batteryLevelDrawerTextDisplay2(&lcd, 3, 16),
+  currentDrawerTextDisplay(&lcd, 2, 16),
+  switchControllerTextDisplay(&lcd, 3, 0);
 
-LcdFixedPositionPrint batteryLevelDrawerTextDisplay(&lcd, 1, 16);
-LcdPrintDrawer batteryLevelDrawer(&batteryLevelDrawerTextDisplay);
-
-LcdFixedPositionPrint currentDrawerTextDisplay(&lcd, 3, 16);
-LcdPrintDrawer currentDrawer(&currentDrawerTextDisplay);
-
-LcdFixedPositionPrint switchControllerTextDisplay(&lcd, 3, 0);
-
-LcdPrintDrawer *voltageOrBatteryLevelDrawer = &voltageDrawer;
+LcdFixedPositionVerticalPrint
+  splitterDrawerTextDisplay(&lcd, 0, 15);
 
 void restart(char code) {
   preferences.putULong("SW_RESET_UPTIME", millis());
@@ -220,14 +225,17 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
       if (payload[0] == 'l') {
         powerSourceDrawer.print("LINE");
         voltageOrBatteryLevelDrawer = &voltageDrawer;
+        showCurrent = true;
       }
       else if (payload[0] == 'g') {
         powerSourceDrawer.print("GENR");
         voltageOrBatteryLevelDrawer = &voltageDrawer;
+        showCurrent = true;
       }
       else if (payload[0] == 'b') {
         powerSourceDrawer.print("BATT");
         voltageOrBatteryLevelDrawer = &batteryLevelDrawer;
+        showCurrent = false;
       }
       else {
         powerSourceDrawer.print("   -");
@@ -247,6 +255,7 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     if (length > 0 && length <= 3) {
       memcpy(&current[3-length], payload, length);
       current[3] = 'A';
+      showCurrent = true;
     }
     currentDrawer.print(current);
   }
@@ -476,7 +485,7 @@ void setup() {
   now = millis();
   lastWifiOnline = now;
 
-  lcd.setCursor(0, 1);
+  lcd.setCursor(0, 2);
   lcd.print("RUN #");
   lcd.print(runCounter);
   lcd.setCursor(0, 3);
@@ -537,6 +546,8 @@ void clock_loop(unsigned long now) {
       // lcd.write("                ");
       showBigNumberFixed(&lcd, timeinfo.tm_hour, 2, 0);
       showBigNumberFixed(&lcd, timeinfo.tm_min, 2, 8);
+
+      splitterDrawerTextDisplay.print("|||");
     }
 
     clock_separator = clock_separator == ' ' ? '.' : ' ';
@@ -604,9 +615,20 @@ void ui_loop() {
   meetingTextControl.draw(&meetingTextDisplay);
   // hallAlert.draw();
   // entranceAlert.draw();
-  powerSourceDrawer.draw();
-  voltageOrBatteryLevelDrawer->draw();
-  currentDrawer.draw();
+  powerSourceDrawer.draw(&powerSourceDrawerTextDisplay);
+  splitterDrawer.draw(&splitterDrawerTextDisplay);
+
+  if (showCurrent) {
+    voltageDrawer.draw(&voltageDrawerTextDisplay);
+    currentDrawer.draw(&currentDrawerTextDisplay);
+    batteryLevelDrawer.draw(&batteryLevelDrawerTextDisplay2);
+    
+  }
+  else {
+    batteryLevelDrawer.draw(&batteryLevelDrawerTextDisplay);
+    currentDrawerTextDisplay.print("    ");
+    batteryLevelDrawerTextDisplay2.print("    ");
+  }
 
   clock_loop(now);
 }

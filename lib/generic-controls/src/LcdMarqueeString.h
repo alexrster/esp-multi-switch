@@ -12,7 +12,7 @@ class LcdMarqueeString
       sprintf(str_format_right, "%%%us", display_len);
       sprintf(str_format_left, "%%-%us", display_len);
 
-      textRenderBuffer = (char *)malloc(sizeof(char) * display_len);
+      textRenderBuffer = (char *)malloc(sizeof(char) * display_len + 2);
     }
 
     void setText(String text)
@@ -52,8 +52,8 @@ class LcdMarqueeString
           return;
         }
 
-        if (text.length() <= display_len) {
-          writeTextRenderBuffer(out, snprintf(textRenderBuffer, display_len, str_format_left, text.c_str()));
+        if (text.length() <= display_len + 1) {
+          writeTextRenderBuffer(out, snprintf(textRenderBuffer, display_len + 1, str_format_left, text.c_str()));
           return;
         }
 
@@ -64,16 +64,16 @@ class LcdMarqueeString
         }
 
         int left = current_offset >= text.length() ? 0 : text.length() - current_offset;
-        int len = current_offset >= text.length() ? display_len + text.length() - current_offset : display_len;
+        int len = current_offset >= text.length() ? display_len - (current_offset - text.length()) : display_len;
 
-        String buf = text.substring(left, left + len - 1);
-        if (buf.length() < display_len)
+        String buf = text.substring(left, left + len);
+        if (buf.length() <= display_len + 1)
         {
           if (current_offset >= text.length()) {    // right-side
-            writeTextRenderBuffer(out, snprintf(textRenderBuffer, display_len, str_format_right, buf.c_str()));
+            writeTextRenderBuffer(out, sprintf(textRenderBuffer, str_format_right, buf.c_str()));
           }
           else {                                    // left-side
-            writeTextRenderBuffer(out, snprintf(textRenderBuffer, display_len, str_format_left, buf.c_str()));
+            writeTextRenderBuffer(out, snprintf(textRenderBuffer, display_len + 1, str_format_left, buf.c_str()));
           }
         }
         else
@@ -91,8 +91,8 @@ class LcdMarqueeString
     bool text_changed = false;
     String text = emptyString;
     char *textRenderBuffer;
-    char str_format_left[5] = {0,0,0,0,0};
-    char str_format_right[4] = {0,0,0,0};
+    char str_format_left[6] = {0,0,0,0,0,0};
+    char str_format_right[6] = {0,0,0,0,0,0};
 
     inline size_t writeTextRenderBuffer(Print* out, int n)
     {
