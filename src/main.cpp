@@ -36,11 +36,13 @@ struct config_t {
   unsigned short wdt_timeout_sec = WDT_TIMEOUT_SEC;
 } Config;
 
-const PROGMEM uint8_t lcdCustomChars[4][8] = {
-  { 0x1F, 0x1F, 0x1E, 0x1E, 0x1F, 0x1F, 0x1F, 0x1F }, // 1: o
-  { 0x1F, 0x1F, 0x1F, 0x07, 0x0F, 0x0F, 0x1F, 0x1F }, // 2: n
-  { 0x1F, 0x10, 0x10, 0x11, 0x11, 0x10, 0x10, 0x1F }, // 3: left half-rect
-  { 0x1F, 0x01, 0x01, 0x11, 0x11, 0x01, 0x01, 0x1F }  // 4: right half-rect
+#define LCD_CUSTOM_CHARS_COUNT  3
+const PROGMEM uint8_t lcdCustomChars[LCD_CUSTOM_CHARS_COUNT][8] = {
+  { 0x00, 0x00, 0x1F, 0x11, 0x1B, 0x11, 0x1F, 0x00 }, // 0: off
+  { 0x00, 0x00, 0x1F, 0x1F, 0x15, 0x1F, 0x1F, 0x00 }, // 1: on
+  { 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01 }  // 2: | (right)
+  // { 0x1F, 0x10, 0x10, 0x11, 0x11, 0x10, 0x10, 0x1F }, // 3: left half-rect
+  // { 0x1F, 0x01, 0x01, 0x11, 0x11, 0x01, 0x01, 0x1F }  // 4: right half-rect
 };
 
 RESET_REASON
@@ -309,7 +311,7 @@ void setupLcd() {
   lcd.begin(20, 4);
   lcd.setExecTimes(1520, 37);
 
-  for(uint8_t i=0; i < 4; i++)
+  for(uint8_t i=0; i < LCD_CUSTOM_CHARS_COUNT; i++)
     lcd.createChar(i, lcdCustomChars[i]);
 
   setupBigDigit(&lcd);
@@ -547,7 +549,7 @@ void clock_loop(unsigned long now) {
       showBigNumberFixed(&lcd, timeinfo.tm_hour, 2, 0);
       showBigNumberFixed(&lcd, timeinfo.tm_min, 2, 8);
 
-      splitterDrawerTextDisplay.print("|||");
+      splitterDrawerTextDisplay.print("\2\2\2\2");
     }
 
     clock_separator = clock_separator == ' ' ? '.' : ' ';

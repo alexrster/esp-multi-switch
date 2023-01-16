@@ -89,23 +89,21 @@ bool pubSubSwitchControllerHandleMessage(String topicStr, byte* payload, unsigne
 void drawSwitchControlLcd(Print *out) {
   if (!switchControlLcdBufReady) {
     uint8_t k = 0;
-    for (uint8_t i = 0; i < 8; i++) {
+    for (uint8_t i = 0; i < 10; i++) {
       if (switchRelays[i]->getState() == On) {
-        switchControlLcdBuf[2*i+k] = 0;
-        switchControlLcdBuf[2*i+1+k] = 1;
+        switchControlLcdBuf[i+k] = 1;
       }
       else {
-        switchControlLcdBuf[2*i+k] = 2;
-        switchControlLcdBuf[2*i+1+k] = 3;
+        switchControlLcdBuf[i+k] = 0;
       }
-      // if (i == 3) {
-      //   switchControlLcdBuf[8] = switchControlLcdBuf[9] = ' ';
-      //   k = 2;
-      // }
+      if (i == 3 || i == 7) {
+        k++;
+        switchControlLcdBuf[i+k] = ' ';
+      }
     }
 
     switchControlLcdBufReady = true;
 
-    out->write(switchControlLcdBuf, 16);
+    out->write(switchControlLcdBuf, 15);
   }
 }
