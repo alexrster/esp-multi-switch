@@ -25,6 +25,7 @@
 #include "time.h"
 #include "reset_info.h"
 #include "version.h"
+#include <ESPAsyncWebServer.h>
 
 struct config_t {
   bool motion = true;
@@ -114,6 +115,8 @@ LcdFixedPositionPrint
 
 LcdFixedPositionVerticalPrint
   splitterDrawerTextDisplay(&lcd, 0, 15);
+
+AsyncWebServer webServer(80);
 
 void restart(char code) {
   preferences.putULong("SW_RESET_UPTIME", millis());
@@ -396,6 +399,81 @@ bool getAdjustedTime(tm *t) {
   return true;
 }
 
+void onHttpSetRelayState(AsyncWebServerRequest *req, uint8_t relayId) {
+  AsyncResponseStream *resp = req->beginResponseStream("text/plain");
+  auto relayStateStr = req->getParam("set")->value();
+  if (relayId >= 0 && relayId < 10 && relayStateStr.length() > 0) {
+    if (relayStateStr.equalsIgnoreCase("on") || relayStateStr.equalsIgnoreCase("true") || relayStateStr.equalsIgnoreCase("1")) {
+      setSwitchState(relayId, On, true);
+      needPublishCurrentState = true;
+      resp->setCode(200);
+    }
+    else if (relayStateStr.equalsIgnoreCase("off") || relayStateStr.equalsIgnoreCase("false") || relayStateStr.equalsIgnoreCase("0")) {
+      setSwitchState(relayId, Off, true);
+      needPublishCurrentState = true;
+      resp->setCode(200);
+    }
+    else {
+      resp->setCode(400);
+      resp->printf("RELAY STATE is invalid!\nRelay State: %s", relayStateStr);
+    }
+  }
+  else {
+    resp->setCode(400);
+    resp->printf("RELAY STATE is not provided or invalid!\nRelay State: %s", relayStateStr);
+  }
+
+  req->send(resp);
+}
+
+void onHttpGetRelayState(AsyncWebServerRequest *req, uint8_t relayId) {
+  AsyncResponseStream *resp = req->beginResponseStream("text/plain");
+  if (relayId >= 0 && relayId < 10) {
+    resp->setCode(200);
+    resp->print(getSwitchState(relayId) == On ? "ON" : "OFF");
+  }
+  else {
+    resp->setCode(400);
+  }
+
+  req->send(resp);
+}
+
+std::function<void(AsyncWebServerRequest*)> onHttpGetRelayStateFactory(uint8_t relayId) {
+  return ([relayId](AsyncWebServerRequest* req) { return onHttpGetRelayState(req, relayId); });
+}
+
+std::function<void(AsyncWebServerRequest*)> onHttpSetRelayStateFactory(uint8_t relayId) {
+  return ([relayId](AsyncWebServerRequest* req) { return onHttpSetRelayState(req, relayId); });
+}
+
+void setup_http()
+{
+  webServer.on("/api/relay/01", HTTP_GET, onHttpGetRelayStateFactory(0));
+  webServer.on("/api/relay/02", HTTP_GET, onHttpGetRelayStateFactory(1));
+  webServer.on("/api/relay/03", HTTP_GET, onHttpGetRelayStateFactory(2));
+  webServer.on("/api/relay/04", HTTP_GET, onHttpGetRelayStateFactory(3));
+  webServer.on("/api/relay/05", HTTP_GET, onHttpGetRelayStateFactory(4));
+  webServer.on("/api/relay/06", HTTP_GET, onHttpGetRelayStateFactory(5));
+  webServer.on("/api/relay/07", HTTP_GET, onHttpGetRelayStateFactory(6));
+  webServer.on("/api/relay/08", HTTP_GET, onHttpGetRelayStateFactory(7));
+  webServer.on("/api/relay/09", HTTP_GET, onHttpGetRelayStateFactory(8));
+  webServer.on("/api/relay/10", HTTP_GET, onHttpGetRelayStateFactory(9));
+
+  webServer.on("/api/relay/01", HTTP_POST, onHttpSetRelayStateFactory(0));
+  webServer.on("/api/relay/02", HTTP_POST, onHttpSetRelayStateFactory(1));
+  webServer.on("/api/relay/03", HTTP_POST, onHttpSetRelayStateFactory(2));
+  webServer.on("/api/relay/04", HTTP_POST, onHttpSetRelayStateFactory(3));
+  webServer.on("/api/relay/05", HTTP_POST, onHttpSetRelayStateFactory(4));
+  webServer.on("/api/relay/06", HTTP_POST, onHttpSetRelayStateFactory(5));
+  webServer.on("/api/relay/07", HTTP_POST, onHttpSetRelayStateFactory(6));
+  webServer.on("/api/relay/08", HTTP_POST, onHttpSetRelayStateFactory(7));
+  webServer.on("/api/relay/09", HTTP_POST, onHttpSetRelayStateFactory(8));
+  webServer.on("/api/relay/10", HTTP_POST, onHttpSetRelayStateFactory(9));
+
+  webServer.begin();
+}
+
 void setup() {
   reset_reason[0] = rtc_get_reset_reason(0);
   reset_reason[1] = rtc_get_reset_reason(1);
@@ -483,6 +561,8 @@ void setup() {
 
   pinMode(BLINDS_ZERO_PIN, INPUT_PULLUP);
   // attachInterrupt(BLINDS_ZERO_PIN, blindsZeroISR, ONLOW);
+
+  setup_http();
 
   now = millis();
   lastWifiOnline = now;

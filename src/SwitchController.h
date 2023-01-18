@@ -21,6 +21,7 @@
 #define SWITCH_STATE_FILENAME         "/state.bin"
 
 void setupSwitchController();
+SwitchState_t getSwitchState(uint8_t switchId);
 void setSwitchState(uint8_t switchId, SwitchState_t newSwitchState, bool saveState = true);
 void pubSubSwitchControllerSubscribe(PubSubClient *pubSubClient);
 bool pubSubSwitchControllerPublishState(PubSubClient *pubSubClient);

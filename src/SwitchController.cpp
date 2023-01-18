@@ -45,9 +45,14 @@ void saveSwitchState() {
   f.close();
 }
 
+SwitchState_t getSwitchState(uint8_t switchId) {
+  return switchRelays[switchId]->getState();
+}
+
 void setSwitchState(uint8_t switchId, SwitchState_t newSwitchState, bool saveState) {
   log_i("Set switch %d to %s", switchId, newSwitchState == On ? "ON" : "OFF");
   switchRelays[switchId]->setState(newSwitchState);
+  switchControlLcdBufReady = false;
 
   if (saveState)
     saveSwitchState();
