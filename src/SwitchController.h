@@ -3,7 +3,7 @@
 
 #include "app.h"
 #include "SwitchRelay.h"
-#include <PubSubClient.h>
+#include "pubsub.h"
 
 #define SWITCH_RELAY_COUNT            10
 
@@ -20,12 +20,10 @@
 
 #define SWITCH_STATE_FILENAME         "/state.bin"
 
-void setupSwitchController();
+void setupSwitchControl(PubSub *pubSubClient);
 SwitchState_t getSwitchState(uint8_t switchId);
 void setSwitchState(uint8_t switchId, SwitchState_t newSwitchState, bool saveState = true);
-void pubSubSwitchControllerSubscribe(PubSubClient *pubSubClient);
-bool pubSubSwitchControllerPublishState(PubSubClient *pubSubClient);
-bool pubSubSwitchControllerHandleMessage(String topicStr, byte* payload, unsigned int length);
+bool publishSwitchControlState();
 void drawSwitchControlLcd(Print *out);
 
 #endif

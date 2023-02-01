@@ -20,19 +20,7 @@ const String PubSubSwitchTopic[] = {
 
 char switchControlLcdBuf[18] = {' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' '};
 bool switchControlLcdBufReady = false;
-
-void setupSwitchController() {
-  switchRelays[0] = new SwitchRelayPin(SWITCH_RELAY0_PIN, 0);
-  switchRelays[1] = new SwitchRelayPin(SWITCH_RELAY1_PIN, 0);
-  switchRelays[2] = new SwitchRelayPin(SWITCH_RELAY2_PIN, 0);
-  switchRelays[3] = new SwitchRelayPin(SWITCH_RELAY3_PIN, 0);
-  switchRelays[4] = new SwitchRelayPin(SWITCH_RELAY4_PIN, 0);
-  switchRelays[5] = new SwitchRelayPin(SWITCH_RELAY5_PIN, 0);
-  switchRelays[6] = new SwitchRelayPin(SWITCH_RELAY6_PIN, 0);
-  switchRelays[7] = new SwitchRelayPin(SWITCH_RELAY7_PIN, 0);
-  switchRelays[8] = new SwitchRelayPin(SWITCH_RELAY8_PIN, 0);
-  switchRelays[9] = new SwitchRelayPin(SWITCH_RELAY9_PIN, 0);
-}
+PubSub *pubSubClient;
 
 void saveSwitchState() {
   if (!getSpiffsEnabled()) 
@@ -58,13 +46,7 @@ void setSwitchState(uint8_t switchId, SwitchState_t newSwitchState, bool saveSta
     saveSwitchState();
 }
 
-void pubSubSwitchControllerSubscribe(PubSubClient *pubSubClient) {
-  for (uint8_t i = 0; i < SWITCH_RELAY_COUNT; i++) {
-    pubSubClient->subscribe(PubSubSwitchTopic[i].c_str(), MQTTQOS0);
-  }
-}
-
-bool pubSubSwitchControllerPublishState(PubSubClient *pubSubClient) {
+bool publishSwitchControlState() {
   bool result = false;
   for (uint8_t i = 0; i < SWITCH_RELAY_COUNT; i++) {
     result |= !pubSubClient->publish(PubSubSwitchTopic[i].c_str(), switchRelays[i]->getState() == On ? "1" : "0");
@@ -73,22 +55,14 @@ bool pubSubSwitchControllerPublishState(PubSubClient *pubSubClient) {
   return result;
 }
 
-bool pubSubSwitchControllerHandleMessage(String topicStr, byte* payload, unsigned int length) {
-  for (uint8_t i = 0; i < SWITCH_RELAY_COUNT; i++) {
-    if (PubSubSwitchTopic[i] == topicStr) {
-      auto actual = switchRelays[i]->getState();
-      auto target = parseBooleanMessage(payload, length, (actual == On)) ? On : Off;
-      
-      if (actual != target) {
-        setSwitchState(i, target, true);
-        switchControlLcdBufReady = false;
-      }
-      
-      return true;
-    }
+void pubSubSwitchControllerHandleMessage(uint8_t i, byte* payload, unsigned int length) {
+  auto actual = switchRelays[i]->getState();
+  auto target = parseBooleanMessage(payload, length, (actual == On)) ? On : Off;
+  
+  if (actual != target) {
+    setSwitchState(i, target, true);
+    switchControlLcdBufReady = false;
   }
-
-  return false;
 }
 
 void drawSwitchControlLcd(Print *out) {
@@ -110,5 +84,24 @@ void drawSwitchControlLcd(Print *out) {
     switchControlLcdBufReady = true;
 
     out->write(switchControlLcdBuf, 15);
+  }
+}
+
+void setupSwitchControl(PubSub *c) {
+  pubSubClient = c;
+
+  switchRelays[0] = new SwitchRelayPin(SWITCH_RELAY0_PIN, 0);
+  switchRelays[1] = new SwitchRelayPin(SWITCH_RELAY1_PIN, 0);
+  switchRelays[2] = new SwitchRelayPin(SWITCH_RELAY2_PIN, 0);
+  switchRelays[3] = new SwitchRelayPin(SWITCH_RELAY3_PIN, 0);
+  switchRelays[4] = new SwitchRelayPin(SWITCH_RELAY4_PIN, 0);
+  switchRelays[5] = new SwitchRelayPin(SWITCH_RELAY5_PIN, 0);
+  switchRelays[6] = new SwitchRelayPin(SWITCH_RELAY6_PIN, 0);
+  switchRelays[7] = new SwitchRelayPin(SWITCH_RELAY7_PIN, 0);
+  switchRelays[8] = new SwitchRelayPin(SWITCH_RELAY8_PIN, 0);
+  switchRelays[9] = new SwitchRelayPin(SWITCH_RELAY9_PIN, 0);
+
+  for (uint8_t i = 0; i < SWITCH_RELAY_COUNT; i++) {
+    pubSubClient->subscribe(PubSubSwitchTopic[i].c_str(), MQTTQOS0, [i](uint8_t* d, unsigned int l) { pubSubSwitchControllerHandleMessage(i, d, l); });
   }
 }

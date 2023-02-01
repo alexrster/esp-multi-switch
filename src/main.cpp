@@ -26,6 +26,7 @@
 #include "reset_info.h"
 #include "version.h"
 #include <ESPAsyncWebServer.h>
+#include <pubsub.h>
 
 struct config_t {
   bool motion = true;
@@ -87,7 +88,7 @@ struct tm timeinfo;
 
 Preferences preferences;
 WiFiClient wifiClient;
-PubSubClient pubSubClient(wifiClient);
+PubSub pubsub(wifiClient);
 hd44780_I2Cexp lcd;
 MotionSensor motionSensor(MOTION_SENSOR_PIN);
 
@@ -138,37 +139,6 @@ void setLcdBacklight(boolean state) {
   else lcd.noBacklight();
 }
 
-bool reconnectPubSub() {
-  if (now - lastPubSubReconnectAttempt > MQTT_RECONNECT_MILLIS) {
-    lastPubSubReconnectAttempt = now;
-
-    if (pubSubClient.connect(MQTT_CLIENT_ID, MQTT_USERNAME, MQTT_PASSWORD, MQTT_STATUS_TOPIC, MQTTQOS0, true, MQTT_STATUS_OFFLINE_MSG, true)) {
-      pubSubClient.publish(MQTT_STATUS_TOPIC, MQTT_STATUS_ONLINE_MSG, true);
-      pubSubClient.publish(MQTT_VERSION_TOPIC, VERSION, true);
-      
-      pubSubClient.subscribe(MQTT_RESTART_CONTROL_TOPIC, MQTTQOS0);
-      pubSubClient.subscribe(MQTT_CURRENT_MEETING_TOPIC, MQTTQOS0);
-      pubSubClient.subscribe(MQTT_BACKLIGHT_TOPIC, MQTTQOS0);
-      pubSubClient.subscribe(MQTT_CONFIG_TOPIC "/set", MQTTQOS0);
-      pubSubClient.subscribe(MQTT_CURRENT_MEETING_TOPIC, MQTTQOS0);
-
-      // pubSubClient.subscribe("loc/hall/motion", MQTTQOS0);
-      // pubSubClient.subscribe("entrance/motion", MQTTQOS0);
-
-      pubSubClient.subscribe("dev/power-line/source", MQTTQOS0);
-      pubSubClient.subscribe("dev/power-line/voltage", MQTTQOS0);
-      pubSubClient.subscribe("dev/power-line/current", MQTTQOS0);
-      pubSubClient.subscribe("dev/esp32-ups-01/battery/percent/int", MQTTQOS0);
-
-      pubSubSwitchControllerSubscribe(&pubSubClient);
-    }
-    
-    return pubSubClient.connected();
-  }
-
-  return false;
-}
-
 bool wifiLoop() {
   if (WiFi.status() != WL_CONNECTED) {
     if (now - lastWifiOnline > Config.wifi_watchdog_ms) restart(RESET_ON_WIFI_WD_TIMEOUT);
@@ -187,98 +157,6 @@ bool wifiLoop() {
   lastWifiReconnect = now;
   lastWifiOnline = now;
   return true;
-}
-
-void onMqttMessage(char* topic, byte* payload, unsigned int length) {
-  if (length == 0) return;
-  if (length > 255) return;
-  log_d("Handle message from '%s':\n%s", topic, (char*)payload);
-
-  String topicStr = topic;
-  if (pubSubSwitchControllerHandleMessage(topicStr, payload, length)) {
-    return;
-  }
-  
-  if (topicStr.equals(MQTT_BACKLIGHT_TOPIC)) {
-    setLcdBacklight(parseBooleanMessage(payload, length));
-  }
-  else if (topicStr.equals(MQTT_CONFIG_TOPIC "/set")) {
-    auto f = SPIFFS.open("/config.json", "w");
-    f.write(payload, length);
-    f.close();
-
-    restart(RESET_ON_CONFIG_UPDATE);
-    return;
-  }
-  else if (topicStr.equals(MQTT_RESTART_CONTROL_TOPIC)) {
-    restart(RESET_ON_MQTT_RESET_TOPIC);
-  }
-  else if (topicStr.equals(MQTT_CURRENT_MEETING_TOPIC)) {
-    if (now - lastMeetingNameUpdate > 5000) {
-      lastMeetingNameUpdate = now;
-      
-      char meeting[256];
-      int l = length > 255 ? 255 : length;
-      strncpy(meeting, (const char*)payload, l);
-      meeting[l] = 0;
-
-      meetingTextControl.setText(meeting);
-    }
-  }
-  else if (topicStr.equals("dev/power-line/source")) {
-    if (length > 0) {
-      if (payload[0] == 'l') {
-        powerSourceDrawer.print("LINE");
-        voltageOrBatteryLevelDrawer = &voltageDrawer;
-        showCurrent = true;
-      }
-      else if (payload[0] == 'g') {
-        powerSourceDrawer.print("GENR");
-        voltageOrBatteryLevelDrawer = &voltageDrawer;
-        showCurrent = true;
-      }
-      else if (payload[0] == 'b') {
-        powerSourceDrawer.print("BATT");
-        voltageOrBatteryLevelDrawer = &batteryLevelDrawer;
-        showCurrent = false;
-      }
-      else {
-        powerSourceDrawer.print("   -");
-        voltageOrBatteryLevelDrawer = &voltageDrawer;
-      }
-    }
-  }
-  else if (topicStr.equals("dev/power-line/voltage")) {
-    char voltage[4] = {'-', ' ', ' ', 'V'};
-    if (length == 3) {
-      memcpy(voltage, payload, 3);
-    }
-    voltageDrawer.print(voltage);
-  }
-  else if (topicStr.equals("dev/power-line/current")) {
-    char current[4] = {' ', ' ', ' ', ' '};
-    if (length > 0 && length <= 3) {
-      memcpy(&current[3-length], payload, length);
-      current[3] = 'A';
-      showCurrent = true;
-    }
-    currentDrawer.print(current);
-  }
-  else if (topicStr.equals("dev/esp32-ups-01/battery/percent/int")) {
-    char percent[4] = {'-', ' ', ' ', '%'};
-    if (length > 0 && length <= 3) {
-      memcpy(percent, payload, length);
-    }
-    batteryLevelDrawer.print(percent);
-  }
-  else if (topicStr.equals("entrance/motion")) {
-    if (payload[0] == '1') entranceAlert.blink(5000);
-    // else entranceAlert.reset();
-  }
-  else if (topicStr.equals("loc/hall/motion")) {
-    if (payload[0] == '1') hallAlert.blink(5000);
-    // else hallAlert.reset();
-  }
 }
 
 void onMotionSensor() {
@@ -474,6 +352,108 @@ void setup_http()
   webServer.begin();
 }
 
+void onPubSubRestart(uint8_t *payload, unsigned int length) { 
+  restart(RESET_ON_MQTT_RESET_TOPIC);
+}
+
+void onPubSubCurrentMeeting(uint8_t *payload, unsigned int length) { 
+  if (now - lastMeetingNameUpdate > 5000) {
+    lastMeetingNameUpdate = now;
+    
+    char meeting[256];
+    int l = length > 255 ? 255 : length;
+    strncpy(meeting, (const char*)payload, l);
+    meeting[l] = 0;
+
+    meetingTextControl.setText(meeting);
+  }
+}
+
+void onPubSubBacklight(uint8_t *payload, unsigned int length) { 
+    setLcdBacklight(parseBooleanMessage(payload, length));
+}
+
+void onPubSubConfig(uint8_t *payload, unsigned int length) {
+  auto f = SPIFFS.open("/config.json", "w");
+  f.write(payload, length);
+  f.close();
+
+  restart(RESET_ON_CONFIG_UPDATE);
+}
+
+void onPubSubPowerLineSource(uint8_t *payload, unsigned int length) { 
+  if (length > 0) {
+    if (payload[0] == 'l') {
+      powerSourceDrawer.print("LINE");
+      voltageOrBatteryLevelDrawer = &voltageDrawer;
+      showCurrent = true;
+    }
+    else if (payload[0] == 'g') {
+      powerSourceDrawer.print("GENR");
+      voltageOrBatteryLevelDrawer = &voltageDrawer;
+      showCurrent = true;
+    }
+    else if (payload[0] == 'b') {
+      powerSourceDrawer.print("BATT");
+      voltageOrBatteryLevelDrawer = &batteryLevelDrawer;
+      showCurrent = false;
+    }
+    else {
+      powerSourceDrawer.print("   -");
+      voltageOrBatteryLevelDrawer = &voltageDrawer;
+    }
+  }
+}
+
+void onPubSubPowerLineVoltage(uint8_t *payload, unsigned int length) { 
+  char voltage[4] = {'-', ' ', ' ', 'V'};
+  if (length == 3) {
+    memcpy(voltage, payload, 3);
+  }
+  voltageDrawer.print(voltage);
+}
+
+void onPubSubPowerLineCurrent(uint8_t *payload, unsigned int length) {
+  char current[4] = {' ', ' ', ' ', ' '};
+  if (length > 0 && length <= 3) {
+    memcpy(&current[3-length], payload, length);
+    current[3] = 'A';
+    showCurrent = true;
+  }
+  currentDrawer.print(current);
+}
+
+void onPubSubBatteryPercentInt(uint8_t *payload, unsigned int length) { 
+  char percent[4] = {'-', ' ', ' ', '%'};
+  if (length > 0 && length <= 3) {
+    memcpy(percent, payload, length);
+  }
+  batteryLevelDrawer.print(percent);
+}
+
+void onPubSubEntranceMotion(uint8_t *payload, unsigned int length) { 
+  if (payload[0] == '1') entranceAlert.blink(5000);
+}
+
+void onPubSubHallMotion(uint8_t *payload, unsigned int length) { 
+  if (payload[0] == '1') hallAlert.blink(5000);
+}
+
+void setup_pubsub() {
+  pubsub.subscribe(MQTT_RESTART_CONTROL_TOPIC, MQTTQOS0, onPubSubRestart);
+  pubsub.subscribe(MQTT_CURRENT_MEETING_TOPIC, MQTTQOS0, onPubSubCurrentMeeting);
+  pubsub.subscribe(MQTT_BACKLIGHT_TOPIC, MQTTQOS0, onPubSubBacklight);
+  pubsub.subscribe(MQTT_CONFIG_TOPIC "/set", MQTTQOS0, onPubSubConfig);
+
+  // pubsub.subscribe("loc/hall/motion", MQTTQOS0, onPubSubEntranceMotion);
+  // pubsub.subscribe("entrance/motion", MQTTQOS0, onPubSubHallMotion);
+
+  pubsub.subscribe("dev/power-line/source", MQTTQOS0, onPubSubPowerLineSource);
+  pubsub.subscribe("dev/power-line/voltage", MQTTQOS0, onPubSubPowerLineVoltage);
+  pubsub.subscribe("dev/power-line/current", MQTTQOS0, onPubSubPowerLineCurrent);
+  pubsub.subscribe("dev/esp32-ups-01/battery/percent/int", MQTTQOS0, onPubSubBatteryPercentInt);
+}
+
 void setup() {
   reset_reason[0] = rtc_get_reset_reason(0);
   reset_reason[1] = rtc_get_reset_reason(1);
@@ -482,7 +462,7 @@ void setup() {
   runCounter = preferences.getULong("__RUN_N", 0) + 1;
   preferences.putULong("__RUN_N", runCounter);
 
-  setupSwitchController();
+  setupSwitchControl(&pubsub);
 
   if(spiffsEnabled && !SPIFFS.begin(true)) {
     log_e("SPIFFS mount failed");
@@ -556,8 +536,7 @@ void setup() {
   ArduinoOTA.onError(otaError);
   ArduinoOTA.begin();
 
-  pubSubClient.setCallback(onMqttMessage);
-  pubSubClient.setServer(MQTT_SERVER_NAME, MQTT_SERVER_PORT);
+  setup_pubsub();
 
   pinMode(BLINDS_ZERO_PIN, INPUT_PULLUP);
   // attachInterrupt(BLINDS_ZERO_PIN, blindsZeroISR, ONLOW);
@@ -579,12 +558,12 @@ void setup() {
 
 bool onJustStarted() {
     bool result = true;
-    result &= pubSubClient.publish(MQTT_CLIENT_ID "/restart_reason/0", get_reset_reason_info(reset_reason[0]).c_str(), true);
-    result &= pubSubClient.publish(MQTT_CLIENT_ID "/restart_reason/1", get_reset_reason_info(reset_reason[1]).c_str(), true);
-    result &= pubSubClient.publish(MQTT_CLIENT_ID "/restart_reason/uptime", String(preferences.getULong("SW_RESET_UPTIME", 0)).c_str(), true);
-    result &= pubSubClient.publish(MQTT_CLIENT_ID "/restart_reason/code", String((uint8_t)sw_reset_reason).c_str(), true);
-    result &= pubSubClient.publish(MQTT_CLIENT_ID "/restart_reason/sw", get_sw_reset_reason_info(sw_reset_reason).c_str(), true);
-    result &= pubSubClient.publish(MQTT_CLIENT_ID "/restart_reason/run_id", String(runCounter-1).c_str(), true);
+    result &= pubsub.publish(MQTT_CLIENT_ID "/restart_reason/0", get_reset_reason_info(reset_reason[0]).c_str(), true);
+    result &= pubsub.publish(MQTT_CLIENT_ID "/restart_reason/1", get_reset_reason_info(reset_reason[1]).c_str(), true);
+    result &= pubsub.publish(MQTT_CLIENT_ID "/restart_reason/uptime", String(preferences.getULong("SW_RESET_UPTIME", 0)).c_str(), true);
+    result &= pubsub.publish(MQTT_CLIENT_ID "/restart_reason/code", String((uint8_t)sw_reset_reason).c_str(), true);
+    result &= pubsub.publish(MQTT_CLIENT_ID "/restart_reason/sw", get_sw_reset_reason_info(sw_reset_reason).c_str(), true);
+    result &= pubsub.publish(MQTT_CLIENT_ID "/restart_reason/run_id", String(runCounter-1).c_str(), true);
 
     String buf;
     DynamicJsonDocument jdoc(256);
@@ -597,7 +576,7 @@ bool onJustStarted() {
     jdoc["wdt_timeout_sec"] = Config.wdt_timeout_sec;
     
     serializeJson(jdoc, buf);
-    result &= pubSubClient.publish(MQTT_CONFIG_TOPIC, buf.c_str(), true);
+    result &= pubsub.publish(MQTT_CONFIG_TOPIC, buf.c_str(), true);
 
     return result;
 }
@@ -651,18 +630,16 @@ void timeconfig_loop(unsigned long now) {
   }
 }
 
-void pubSubClientLoop() {
-  if (!pubSubClient.connected() && !reconnectPubSub()) return;
+void pubsub_loop(unsigned long now) {
+  if (!pubsub.loop(now)) return;
 
   if (needPublishCurrentState) {
-    needPublishCurrentState = pubSubSwitchControllerPublishState(&pubSubClient);
+    needPublishCurrentState = publishSwitchControlState();
   }
 
   if (needPublishMotionState) {
-    needPublishMotionState = !pubSubClient.publish("balcony/motion", motionSensor.getState() != None ? "1" : "0");
+    needPublishMotionState = !pubsub.publish("balcony/motion", motionSensor.getState() != None ? "1" : "0");
   }
-
-  pubSubClient.loop();
 }
 
 #ifdef AC_DETECTOR
@@ -671,8 +648,8 @@ void ac_loop(unsigned long now) {
     auto value = zc;
     zc = 0;
 
-    pubSubClient.publish(MQTT_CLIENT_ID "/ac/count", String(value).c_str());
-    pubSubClient.publish(MQTT_CLIENT_ID "/ac/millis", String(now - lastAcPublish).c_str());
+    pubsub.publish(MQTT_CLIENT_ID "/ac/count", String(value).c_str());
+    pubsub.publish(MQTT_CLIENT_ID "/ac/millis", String(now - lastAcPublish).c_str());
 
     lastAcPublish = now;
   }
@@ -723,7 +700,7 @@ void blinds_loop() {
     if (blindsZero != lastBlindsZero) {
       lastBlindsZero = blindsZero;
 
-      pubSubClient.publish(MQTT_BLINDS_ZERO_TOPIC, blindsZero ? "1" : "0", false);
+      pubsub.publish(MQTT_BLINDS_ZERO_TOPIC, blindsZero ? "1" : "0", false);
     }
   }
 }
@@ -760,7 +737,7 @@ void loop() {
   }
 
   timeconfig_loop(now);
-  pubSubClientLoop();
+  pubsub_loop(now);
   ui_loop();
 
   if (now - lastOtaHandle > 2000) {

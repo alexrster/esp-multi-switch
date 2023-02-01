@@ -9,6 +9,8 @@
     "initializer_list": "cpp",
     "functional": "cpp",
     "new": "cpp",
-    "*.tcc": "cpp"
+    "*.tcc": "cpp",
+    "list": "cpp",
+    "queue": "cpp"
   }
 }
