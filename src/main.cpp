@@ -165,10 +165,10 @@ void on_motion_state(MotionState_t state) {
     lastMotionDetected = now;
 
     setLcdBacklight(true);
-    pubsub.publish("balcony/motion", "1");
+    pubsub.publish(MQTT_CLIENT_ID "/motion", "1");
   }
   else {
-    pubsub.publish("balcony/motion", "0");
+    pubsub.publish(MQTT_CLIENT_ID "/motion", "0");
   }
 }
 
@@ -660,9 +660,9 @@ void ac_loop(unsigned long now) {
 }
 #endif
 
-void motion_loop() {
+void motion_loop(unsigned long now) {
   if (Config.motion) {
-    motionSensor.loop();
+    motionSensor.loop(now);
   }
 
   if (now - lastMotionDetected > Config.backlightTimeout) {
@@ -723,7 +723,6 @@ void loop() {
   }
 
   // ac_loop(now);
-  motion_loop();
   blinds_loop();
 
   if (!wifiLoop()) {
@@ -741,6 +740,7 @@ void loop() {
   }
 
   timeconfig_loop(now);
+  motion_loop(now);
   pubsub_loop(now);
   ui_loop();
 

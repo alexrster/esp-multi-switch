@@ -51,6 +51,7 @@ class PubSub {
       String payload;
       bool retained;
       unsigned long expires;
+      uint8_t retry_counter = 0;
 
       message_t(const char* topic, const char* payload, boolean retained = false, unsigned long expires = 0)
         : topic(topic), payload(payload), retained(retained), expires(expires)
@@ -73,6 +74,7 @@ class PubSub {
     
     PubSubClient *pubSubClient;
     std::queue<message_t> messageQueue;
+    std::queue<message_t> requeueMessages;
     std::list<topic_subscription_t> topicSubscriptions;
     unsigned long lastPubSubReconnectAttempt = 0;
 
@@ -108,14 +110,36 @@ class PubSub {
 
     bool queue_publish(unsigned long now) {
       bool result = true;
+      if (messageQueue.size() == 0) return true;
+
+#ifdef DEBUG
+      result &= pubSubClient->publish(MQTT_CLIENT_ID "/debug/pubsub/queue_length", String(messageQueue.size()).c_str());
+#endif
 
       while (!messageQueue.empty()) {
         auto m = messageQueue.front();
         messageQueue.pop();
 
-        if (m.expires > 0 && m.expires < now) {
-          result &= pubSubClient->publish(m.topic.c_str(), m.payload.c_str(), m.retained);
+        if (m.expires == 0 || (m.expires > 0 && m.expires < now)) {
+          if (pubSubClient->publish(m.topic.c_str(), m.payload.c_str(), m.retained)) {
+            result &= true;
+          }
+          else {
+            result &= false;
+            if (m.retry_counter++ < 3) {
+              requeueMessages.push(m);
+            }
+          }
         }
+      }
+
+#ifdef DEBUG
+      result &= pubSubClient->publish(MQTT_CLIENT_ID "/debug/pubsub/requeue_count", String(requeueMessages.size()).c_str());
+#endif
+
+      while (!requeueMessages.empty()) {
+        messageQueue.push(requeueMessages.front());
+        requeueMessages.pop();
       }
 
       return result;

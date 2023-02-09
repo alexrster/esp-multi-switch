@@ -30,7 +30,10 @@ class MotionSensor
       onMotionStateCallback = cb;
     }
 
-    void loop() {
+    void loop(unsigned long now) {
+      if (now - lastReadValueMs < 1000) return;
+
+      lastReadValueMs = now;
       int s = digitalRead(pin);
       if (s != (int)state) {
         setState(s);
@@ -44,6 +47,7 @@ class MotionSensor
     uint8_t pin;
     MotionState_t state = None, lastState = None;
     MotionSensorEventCallback onMotionStateCallback = NULL;
+    unsigned long lastReadValueMs = 0;
 
     void setState(int value) {
       log_d("Motion sensor @%d: value=%d", pin, value);
