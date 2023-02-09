@@ -70,7 +70,6 @@ unsigned long
 
 bool 
   needPublishCurrentState = true,
-  needPublishMotionState = true,
   justStarted = true,
   otaUpdateMode = false,
   lastBlindsZero = false,
@@ -159,13 +158,17 @@ bool wifiLoop() {
   return true;
 }
 
-void onMotionSensor() {
-  log_d("On MotionSensor event: state=%s", motionSensor.getState() == None ? "NONE" : "DETECTED");
-  needPublishMotionState = true;
+void on_motion_state(MotionState_t state) {
+  log_d("On MotionSensor event: state=%s", state == None ? "NONE" : "DETECTED");
 
-  if (motionSensor.getState() == Detected) {
+  if (state == Detected) {
     lastMotionDetected = now;
+
     setLcdBacklight(true);
+    pubsub.publish("balcony/motion", "1");
+  }
+  else {
+    pubsub.publish("balcony/motion", "0");
   }
 }
 
@@ -525,7 +528,7 @@ void setup() {
 #endif
 
   if (Config.motion) {
-    motionSensor.onChanged(onMotionSensor);
+    motionSensor.onChanged(on_motion_state);
   }
 
   WiFi.setHostname(WIFI_HOSTNAME);
@@ -640,10 +643,6 @@ void pubsub_loop(unsigned long now) {
 
   if (needPublishCurrentState) {
     needPublishCurrentState = publishSwitchControlState();
-  }
-
-  if (needPublishMotionState) {
-    needPublishMotionState = !pubsub.publish("balcony/motion", motionSensor.getState() != None ? "1" : "0");
   }
 }
 

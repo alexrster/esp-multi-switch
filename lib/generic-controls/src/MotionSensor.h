@@ -6,10 +6,10 @@
 
 typedef enum MotionState { 
   None = 0,
-  Detected
+  Detected = 1
 } MotionState_t;
 
-typedef std::function<void(void)> MotionSensorEventCallback;
+typedef std::function<void(MotionState_t)> MotionSensorEventCallback;
 
 class MotionSensor
 {
@@ -36,7 +36,7 @@ class MotionSensor
         setState(s);
 
         if (onMotionStateCallback != NULL)
-          onMotionStateCallback();
+          onMotionStateCallback((MotionState_t)s);
       }
     }
 

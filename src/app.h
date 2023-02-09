@@ -30,7 +30,7 @@
 #define MQTT_USERNAME                 NULL
 #define MQTT_PASSWORD                 NULL
 #define MQTT_RECONNECT_MILLIS         5000
-#define MQTT_QUEUE_MAX_SIZE           50
+#define MQTT_QUEUE_MAX_SIZE           100
 
 #ifndef MQTT_CLIENT_ID
 #define MQTT_CLIENT_ID                WIFI_HOSTNAME
