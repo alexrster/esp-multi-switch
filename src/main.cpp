@@ -398,6 +398,11 @@ void onPubSubPowerLineSource(uint8_t *payload, unsigned int length) {
       voltageOrBatteryLevelDrawer = &batteryLevelDrawer;
       showCurrent = false;
     }
+    else if (payload[0] == 's') {
+      powerSourceDrawer.print("SOLR");
+      voltageOrBatteryLevelDrawer = &voltageDrawer;
+      showCurrent = true;
+    }
     else {
       powerSourceDrawer.print("   -");
       voltageOrBatteryLevelDrawer = &voltageDrawer;
