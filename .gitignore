@@ -5,3 +5,4 @@
 .vscode/ipch
 src/version.h
 wifi.ini
+mqtt.ini

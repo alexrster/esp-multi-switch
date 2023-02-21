@@ -25,10 +25,7 @@
 #define WIFI_HOSTNAME                 "multiswitch-01"
 #endif
 
-#define MQTT_SERVER_NAME              "10.9.9.96"
 #define MQTT_SERVER_PORT              1883
-#define MQTT_USERNAME                 NULL
-#define MQTT_PASSWORD                 NULL
 #define MQTT_RECONNECT_MILLIS         5000
 #define MQTT_QUEUE_MAX_SIZE           100
 
