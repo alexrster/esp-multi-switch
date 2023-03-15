@@ -22,6 +22,7 @@
 #include "LcdSymbolAlert.h"
 #include "LcdBigSymbolAlert.h"
 #include "LcdPrintDrawer.h"
+#include "LcdBlinkString.h"
 #include "time.h"
 #include "reset_info.h"
 #include "version.h"
@@ -97,8 +98,10 @@ LcdMarqueeString meetingTextControl(15);
 LcdBigSymbolAlert hallAlert(&lcd, 10, 17);
 LcdBigSymbolAlert entranceAlert(&lcd, 11, 17);
 
+// LcdBlinkString powerSourceText(4);
+LcdMarqueeString powerSourceText(4);
+
 LcdPrintDrawer 
-  powerSourceDrawer,
   voltageDrawer,
   batteryLevelDrawer,
   currentDrawer,
@@ -387,27 +390,35 @@ void onPubSubConfig(uint8_t *payload, unsigned int length) {
 void onPubSubPowerLineSource(uint8_t *payload, unsigned int length) { 
   if (length > 0) {
     if (payload[0] == 'l') {
-      powerSourceDrawer.print("LINE");
-      voltageOrBatteryLevelDrawer = &voltageDrawer;
-      showCurrent = true;
+      if (length > 4) {
+        // LINE-SOLAR mode
+        powerSourceText.setText("LINE-SOLAR");
+        voltageOrBatteryLevelDrawer = &voltageDrawer;
+        showCurrent = true;
+      }
+      else {
+        powerSourceText.setText("LINE");
+        voltageOrBatteryLevelDrawer = &voltageDrawer;
+        showCurrent = true;
+      }
     }
     else if (payload[0] == 'g') {
-      powerSourceDrawer.print("GENR");
+      powerSourceText.setText("GENR");
       voltageOrBatteryLevelDrawer = &voltageDrawer;
       showCurrent = true;
     }
     else if (payload[0] == 'b') {
-      powerSourceDrawer.print("BATT");
+      powerSourceText.setText("BATT");
       voltageOrBatteryLevelDrawer = &batteryLevelDrawer;
       showCurrent = false;
     }
     else if (payload[0] == 's') {
-      powerSourceDrawer.print("SOLR");
+      powerSourceText.setText("SOLR");
       voltageOrBatteryLevelDrawer = &voltageDrawer;
       showCurrent = true;
     }
     else {
-      powerSourceDrawer.print("   -");
+      powerSourceText.setText("   -");
       voltageOrBatteryLevelDrawer = &voltageDrawer;
     }
   }
@@ -678,7 +689,8 @@ void ui_loop() {
   meetingTextControl.draw(&meetingTextDisplay);
   // hallAlert.draw();
   // entranceAlert.draw();
-  powerSourceDrawer.draw(&powerSourceDrawerTextDisplay);
+  // powerSourceDrawer.draw(&powerSourceDrawerTextDisplay);
+  powerSourceText.draw(&powerSourceDrawerTextDisplay);
   splitterDrawer.draw(&splitterDrawerTextDisplay);
 
   if (showCurrent) {
