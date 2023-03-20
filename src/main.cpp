@@ -98,7 +98,7 @@ LcdMarqueeString meetingTextControl(15);
 LcdBigSymbolAlert hallAlert(&lcd, 10, 17);
 LcdBigSymbolAlert entranceAlert(&lcd, 11, 17);
 
-// LcdBlinkString powerSourceText(4);
+LcdBlinkString currentPowerText(4, 3666);
 LcdMarqueeString powerSourceText(4);
 
 LcdPrintDrawer 
@@ -442,6 +442,18 @@ void onPubSubPowerLineCurrent(uint8_t *payload, unsigned int length) {
   currentDrawer.print(current);
 }
 
+void onPubSubCurrentPowerText(uint8_t *payload, unsigned int length) {
+  if (length != 8) {
+    currentPowerText.setText("   -");
+    return;
+  }
+
+  char txt[8];
+  memcpy(txt, payload, 8);
+  currentPowerText.setText(txt);
+  showCurrent = true;
+}
+
 void onPubSubBatteryPercentInt(uint8_t *payload, unsigned int length) { 
   char percent[4] = {'-', ' ', ' ', '%'};
   if (length > 0 && length <= 3) {
@@ -469,8 +481,9 @@ void setup_pubsub() {
 
   pubsub.subscribe("dev/power-line/source", MQTTQOS0, onPubSubPowerLineSource);
   pubsub.subscribe("dev/power-line/voltage", MQTTQOS0, onPubSubPowerLineVoltage);
-  pubsub.subscribe("dev/power-line/current", MQTTQOS0, onPubSubPowerLineCurrent);
+  // pubsub.subscribe("dev/power-line/current", MQTTQOS0, onPubSubPowerLineCurrent);
   pubsub.subscribe("dev/esp32-ups-01/battery/percent/int", MQTTQOS0, onPubSubBatteryPercentInt);
+  pubsub.subscribe(MQTT_CLIENT_ID "/txt/power", MQTTQOS0, onPubSubCurrentPowerText);
 }
 
 void setup() {
@@ -689,19 +702,18 @@ void ui_loop() {
   meetingTextControl.draw(&meetingTextDisplay);
   // hallAlert.draw();
   // entranceAlert.draw();
-  // powerSourceDrawer.draw(&powerSourceDrawerTextDisplay);
   powerSourceText.draw(&powerSourceDrawerTextDisplay);
   splitterDrawer.draw(&splitterDrawerTextDisplay);
 
   if (showCurrent) {
     voltageDrawer.draw(&voltageDrawerTextDisplay);
-    currentDrawer.draw(&currentDrawerTextDisplay);
+    currentPowerText.draw(&currentDrawerTextDisplay);
     batteryLevelDrawer.draw(&batteryLevelDrawerTextDisplay2);
     
   }
   else {
     batteryLevelDrawer.draw(&batteryLevelDrawerTextDisplay);
-    currentDrawerTextDisplay.print("    ");
+    currentPowerText.draw(&currentDrawerTextDisplay);
     batteryLevelDrawerTextDisplay2.print("    ");
   }
 
