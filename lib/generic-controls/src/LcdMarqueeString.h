@@ -17,7 +17,7 @@ class LcdMarqueeString
 
     void setText(String text)
     {
-      if (this->text.equals(text)) return;
+      if (this->new_text.equals(text)) return;
 
       text_changed = true;
       if (text.length() > 0)
@@ -117,7 +117,7 @@ class LcdMarqueeString
 
     void setInitialOffset()
     {
-      if (text_changed) text = new_text;
+      if (!text.equals(new_text)) text = new_text.c_str();
 
       if (text.length() > display_len) {
         current_offset = text.length() + display_len;
