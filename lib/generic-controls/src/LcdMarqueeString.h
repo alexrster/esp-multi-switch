@@ -19,18 +19,19 @@ class LcdMarqueeString
     {
       if (this->text.equals(text)) return;
 
+      text_changed = true;
       if (text.length() > 0)
       {
-        this->text = text.c_str();
-        setInitialOffset();
+        this->new_text = text.c_str();
+        if (this->text.length() <= 0) {
+          setInitialOffset();
+        }
       }
       else
       {
-        this->text = emptyString;
+        this->new_text = emptyString;
         current_offset = 0;
       }
-
-      text_changed = true;
     }
 
     void draw(Print* out)
@@ -40,10 +41,10 @@ class LcdMarqueeString
 
     void draw(Print* out, bool force)
     {
-      if (!force && !text_changed && text.length() <= 0) return;
+      if (!force && text.length() <= 0) return;
 
       now = millis();
-      if (force || text_changed || now - last_draw >= speed_ms) {
+      if (force || now - last_draw >= speed_ms) {
         last_draw = now;
         text_changed = false;
 
@@ -57,7 +58,7 @@ class LcdMarqueeString
           return;
         }
 
-        if (--current_offset <= 0)
+        if (--current_offset < 0)
         {
           setInitialOffset();
           return;
@@ -90,6 +91,7 @@ class LcdMarqueeString
     long now, last_draw = 0;
     bool text_changed = false;
     String text = emptyString;
+    String new_text = emptyString;
     char *textRenderBuffer;
     char str_format_left[6] = {0,0,0,0,0,0};
     char str_format_right[6] = {0,0,0,0,0,0};
@@ -115,6 +117,8 @@ class LcdMarqueeString
 
     void setInitialOffset()
     {
+      if (text_changed) text = new_text;
+
       if (text.length() > display_len) {
         current_offset = text.length() + display_len;
       }

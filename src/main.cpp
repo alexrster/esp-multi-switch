@@ -98,7 +98,7 @@ LcdMarqueeString meetingTextControl(15);
 LcdBigSymbolAlert hallAlert(&lcd, 10, 17);
 LcdBigSymbolAlert entranceAlert(&lcd, 11, 17);
 
-LcdBlinkString currentPowerText(4, 3666);
+LcdMarqueeString currentPowerText(4);
 LcdMarqueeString powerSourceText(4);
 
 LcdPrintDrawer 
@@ -443,13 +443,10 @@ void onPubSubPowerLineCurrent(uint8_t *payload, unsigned int length) {
 }
 
 void onPubSubCurrentPowerText(uint8_t *payload, unsigned int length) {
-  if (length != 8) {
-    currentPowerText.setText("   -");
-    return;
-  }
+  char txt[20];
+  memcpy(txt, payload, length);
+  txt[length < 20 ? length : 20] = 0;
 
-  char txt[8];
-  memcpy(txt, payload, 8);
   currentPowerText.setText(txt);
   showCurrent = true;
 }
