@@ -443,9 +443,9 @@ void onPubSubPowerLineCurrent(uint8_t *payload, unsigned int length) {
 }
 
 void onPubSubCurrentPowerText(uint8_t *payload, unsigned int length) {
-  char txt[20];
+  char txt[64];
   memcpy(txt, payload, length);
-  txt[length < 20 ? length : 20] = 0;
+  txt[length < 64 ? length : 64] = 0;
 
   currentPowerText.setText(txt);
   showCurrent = true;
