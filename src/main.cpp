@@ -362,16 +362,21 @@ void onPubSubRestart(uint8_t *payload, unsigned int length) {
   restart(RESET_ON_MQTT_RESET_TOPIC);
 }
 
-void onPubSubCurrentMeeting(uint8_t *payload, unsigned int length) { 
+void onPubSubCurrentMeeting(uint8_t *payload, unsigned int length) {
   if (now - lastMeetingNameUpdate > 5000) {
     lastMeetingNameUpdate = now;
     
-    char meeting[256];
-    int l = length > 255 ? 255 : length;
-    strncpy(meeting, (const char*)payload, l);
-    meeting[l] = 0;
+    if (length > 0) {
+      char meeting[256];
+      int l = length > 255 ? 255 : length;
+      memcpy(meeting, payload, l);
+      meeting[l] = 0;
 
-    meetingTextControl.setText(meeting);
+      meetingTextControl.setText(meeting);
+    }
+    else {
+      meetingTextControl.setText("");
+    }
   }
 }
 
