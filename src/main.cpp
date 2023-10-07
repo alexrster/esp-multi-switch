@@ -484,7 +484,7 @@ void setup_pubsub() {
   pubsub.subscribe("dev/power-line/source", MQTTQOS0, onPubSubPowerLineSource);
   pubsub.subscribe("dev/power-line/voltage", MQTTQOS0, onPubSubPowerLineVoltage);
   // pubsub.subscribe("dev/power-line/current", MQTTQOS0, onPubSubPowerLineCurrent);
-  pubsub.subscribe("dev/esp32-ups-01/battery/percent/int", MQTTQOS0, onPubSubBatteryPercentInt);
+  pubsub.subscribe("dev/power-line/battery/percent", MQTTQOS0, onPubSubBatteryPercentInt);
   pubsub.subscribe(MQTT_CLIENT_ID "/txt/power", MQTTQOS0, onPubSubCurrentPowerText);
 }
 
