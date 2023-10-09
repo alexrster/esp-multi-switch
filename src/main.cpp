@@ -75,7 +75,8 @@ bool
   otaUpdateMode = false,
   lastBlindsZero = false,
   showCurrent = false,
-  spiffsEnabled = true;
+  spiffsEnabled = true,
+  greatTextControlActive = true;
 
 int
   lastTimeMin = -1;
@@ -98,7 +99,8 @@ LcdMarqueeString meetingTextControl(15);
 LcdBigSymbolAlert hallAlert(&lcd, 10, 17);
 LcdBigSymbolAlert entranceAlert(&lcd, 11, 17);
 
-LcdMarqueeString currentPowerText(4);
+LcdMarqueeString greatTextControl(20);
+LcdMarqueeString currentPowerText(20);
 LcdMarqueeString powerSourceText(4);
 
 LcdPrintDrawer 
@@ -113,7 +115,7 @@ LcdFixedPositionPrint
   voltageDrawerTextDisplay(&lcd, 1, 16),
   batteryLevelDrawerTextDisplay(&lcd, 1, 16),
   batteryLevelDrawerTextDisplay2(&lcd, 3, 16),
-  currentDrawerTextDisplay(&lcd, 2, 16),
+  currentDrawerTextDisplay(&lcd, 2, 0),
   switchControllerTextDisplay(&lcd, 3, 0);
 
 LcdFixedPositionVerticalPrint
@@ -373,9 +375,11 @@ void onPubSubCurrentMeeting(uint8_t *payload, unsigned int length) {
       meeting[l] = 0;
 
       meetingTextControl.setText(meeting);
+      greatTextControlActive = false;
     }
     else {
       meetingTextControl.setText("");
+      greatTextControlActive = true;
     }
   }
 }
@@ -448,11 +452,13 @@ void onPubSubPowerLineCurrent(uint8_t *payload, unsigned int length) {
 }
 
 void onPubSubCurrentPowerText(uint8_t *payload, unsigned int length) {
-  char txt[64];
+  char txt[256];
   memcpy(txt, payload, length);
-  txt[length < 64 ? length : 64] = 0;
+  txt[length < 256 ? length : 256] = 0;
 
   currentPowerText.setText(txt);
+  // greatTextControl.setText(txt);
+    
   showCurrent = true;
 }
 
@@ -642,7 +648,7 @@ void clock_loop(unsigned long now) {
       showBigNumberFixed(&lcd, timeinfo.tm_hour, 2, 0);
       showBigNumberFixed(&lcd, timeinfo.tm_min, 2, 8);
 
-      splitterDrawerTextDisplay.print("\2\2\2\2");
+      splitterDrawerTextDisplay.print(greatTextControlActive ? "\2\2 \2" : "\2\2\2\2");
     }
 
     clock_separator = clock_separator == ' ' ? '.' : ' ';
@@ -701,21 +707,26 @@ void ui_loop() {
   lastUiRedraw = now;
 
   drawSwitchControlLcd(&switchControllerTextDisplay);
-  meetingTextControl.draw(&meetingTextDisplay);
   // hallAlert.draw();
   // entranceAlert.draw();
   powerSourceText.draw(&powerSourceDrawerTextDisplay);
   splitterDrawer.draw(&splitterDrawerTextDisplay);
 
+  // if (greatTextControlActive) {
+  //   greatTextControl.draw(&meetingTextDisplay);
+  // }
+  // else {
+    currentPowerText.draw(&currentDrawerTextDisplay);
+    // meetingTextControl.draw(&meetingTextDisplay);
+  // }
+
   if (showCurrent) {
     voltageDrawer.draw(&voltageDrawerTextDisplay);
-    currentPowerText.draw(&currentDrawerTextDisplay);
     batteryLevelDrawer.draw(&batteryLevelDrawerTextDisplay2);
     
   }
   else {
-    batteryLevelDrawer.draw(&batteryLevelDrawerTextDisplay);
-    currentPowerText.draw(&currentDrawerTextDisplay);
+    batteryLevelDrawer.draw(&batteryLevelDrawerTextDisplay);    
     batteryLevelDrawerTextDisplay2.print("    ");
   }
 
