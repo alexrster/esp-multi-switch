@@ -6,3 +6,4 @@
 src/version.h
 wifi.ini
 mqtt.ini
+secrets.h

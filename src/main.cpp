@@ -87,7 +87,6 @@ char
 
 struct tm timeinfo;
 
-Preferences preferences;
 WiFiClient wifiClient;
 PubSub pubsub(wifiClient);
 hd44780_I2Cexp lcd;
@@ -122,6 +121,7 @@ LcdFixedPositionVerticalPrint
   splitterDrawerTextDisplay(&lcd, 0, 15);
 
 AsyncWebServer webServer(80);
+Preferences preferences;
 
 void restart(char code) {
   preferences.putULong("SW_RESET_UPTIME", millis());
@@ -389,11 +389,13 @@ void onPubSubBacklight(uint8_t *payload, unsigned int length) {
 }
 
 void onPubSubConfig(uint8_t *payload, unsigned int length) {
-  auto f = SPIFFS.open("/config.json", "w");
-  f.write(payload, length);
-  f.close();
+  if (spiffsEnabled && length > 0) {
+    auto f = SPIFFS.open("/config.json", "w");
+    f.write(payload, length);
+    f.close();
 
-  restart(RESET_ON_CONFIG_UPDATE);
+    restart(RESET_ON_CONFIG_UPDATE);
+  }
 }
 
 void onPubSubPowerLineSource(uint8_t *payload, unsigned int length) { 
@@ -497,14 +499,15 @@ void setup_pubsub() {
 void setup() {
   reset_reason[0] = rtc_get_reset_reason(0);
   reset_reason[1] = rtc_get_reset_reason(1);
+ 
+  if (!preferences.begin("/prefs")) {
+    log_e("Preferences failed to start");
+  }
 
-  preferences.begin("multiswitch-01");
   runCounter = preferences.getULong("__RUN_N", 0) + 1;
   preferences.putULong("__RUN_N", runCounter);
 
-  setupSwitchControl(&pubsub);
-
-  if(spiffsEnabled && !SPIFFS.begin(true)) {
+  if(spiffsEnabled && !SPIFFS.begin()) {
     log_e("SPIFFS mount failed");
     spiffsEnabled = false;
   }
@@ -539,13 +542,16 @@ void setup() {
     f.close();
   }
 
-  // if (spiffsEnabled && SPIFFS.exists(SW_RESET_REASON_FILENAME)) {
-  //   auto f = SPIFFS.open(SW_RESET_REASON_FILENAME);
-  //   sw_reset_reason = f.read();
-  //   f.close();
+  if (spiffsEnabled && SPIFFS.exists(SW_RESET_REASON_FILENAME)) {
+    auto f = SPIFFS.open(SW_RESET_REASON_FILENAME);
+    sw_reset_reason = f.read();
+    f.close();
 
-  //   SPIFFS.remove(SW_RESET_REASON_FILENAME);
-  // }
+    SPIFFS.remove(SW_RESET_REASON_FILENAME);
+  }
+
+  // Disable brownout detector
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
 
   sw_reset_reason = preferences.getUChar("SW_RESET_REASON");
 
@@ -564,10 +570,17 @@ void setup() {
   }
 
   WiFi.setHostname(WIFI_HOSTNAME);
+  WiFi.mode(WIFI_STA);
   WiFi.setAutoConnect(true);
   WiFi.setAutoReconnect(true);
   WiFi.setSleep(wifi_ps_type_t::WIFI_PS_NONE);
-  WiFi.begin(WIFI_SSID, WIFI_PASSPHRASE);
+  if (WiFi.begin("qx.zone", "1234Qwer-") != WL_CONNECTED) {
+    log_e("WiFi connection pending...");
+
+    if (WiFi.waitForConnectResult() != WL_CONNECTED) {
+      log_e("WiFi connection failed!");
+    }
+  }
 
   ArduinoOTA.setRebootOnSuccess(true);
   ArduinoOTA.onStart(otaStarted);
@@ -577,6 +590,7 @@ void setup() {
   ArduinoOTA.begin();
 
   setup_pubsub();
+  setupSwitchControl(&pubsub);
 
   pinMode(BLINDS_ZERO_PIN, INPUT_PULLUP);
   // attachInterrupt(BLINDS_ZERO_PIN, blindsZeroISR, ONLOW);

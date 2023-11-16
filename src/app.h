@@ -48,7 +48,7 @@
 #define SW_RESET_REASON_FILENAME      "/swresr.bin"
 
 #define GMT_OFFSET_SEC                2*60*60
-#define DAYLIGHT_OFFSET_SEC           1*60*60
+#define DAYLIGHT_OFFSET_SEC           0*60*60
 
 #define NTP_SERVER                    "ua.pool.ntp.org"
 #define NTP_UPDATE_MS                 1*60000                                  // every 1 minute

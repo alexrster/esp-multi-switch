@@ -1,6 +1,6 @@
 FILENAME_BUILDNO = 'VERSION'
 FILENAME_VERSION_H = 'src/version.h'
-version = '0.2.'
+version = '0.3.'
 
 import datetime
 from pathlib import Path
