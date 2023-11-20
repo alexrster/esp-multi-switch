@@ -15,15 +15,15 @@
 #include "SwitchRelay.h"
 #include "SwitchController.h"
 #include "MotionSensor.h"
-#include "LcdFixedPositionPrint.h"
-#include "LcdFixedPositionVerticalPrint.h"
-#include "LcdMarqueeString.h"
-#include "LcdBigDigits.h"
-#include "LcdSymbolAlert.h"
-#include "LcdBigSymbolAlert.h"
-#include "LcdPrintDrawer.h"
-#include "LcdBlinkString.h"
-#include "time.h"
+#include <LcdFixedPositionPrint.h>
+#include <LcdFixedPositionVerticalPrint.h>
+#include <LcdMarqueeString.h>
+#include <LcdBigDigits.h>
+#include <LcdSymbolAlert.h>
+#include <LcdBigSymbolAlert.h>
+#include <LcdPrintDrawer.h>
+#include <LcdBlinkString.h>
+#include <time.h>
 #include "reset_info.h"
 #include "version.h"
 #include <ESPAsyncWebServer.h>
@@ -163,10 +163,10 @@ bool wifiLoop() {
   return true;
 }
 
-void on_motion_state(MotionState_t state) {
+void on_motion_state(MotionSensor* sensor, MotionState state) {
   log_d("On MotionSensor event: state=%s", state == None ? "NONE" : "DETECTED");
 
-  if (state == Detected) {
+  if (state == MotionState::Detected) {
     lastMotionDetected = now;
 
     setLcdBacklight(true);
@@ -290,12 +290,12 @@ void onHttpSetRelayState(AsyncWebServerRequest *req, uint8_t relayId) {
   auto relayStateStr = req->getParam("set")->value();
   if (relayId >= 0 && relayId < 10 && relayStateStr.length() > 0) {
     if (relayStateStr.equalsIgnoreCase("on") || relayStateStr.equalsIgnoreCase("true") || relayStateStr.equalsIgnoreCase("1")) {
-      setSwitchState(relayId, On, true);
+      setSwitchState(relayId, SwitchState::On, true);
       needPublishCurrentState = true;
       resp->setCode(200);
     }
     else if (relayStateStr.equalsIgnoreCase("off") || relayStateStr.equalsIgnoreCase("false") || relayStateStr.equalsIgnoreCase("0")) {
-      setSwitchState(relayId, Off, true);
+      setSwitchState(relayId, SwitchState::Off, true);
       needPublishCurrentState = true;
       resp->setCode(200);
     }
@@ -316,7 +316,7 @@ void onHttpGetRelayState(AsyncWebServerRequest *req, uint8_t relayId) {
   AsyncResponseStream *resp = req->beginResponseStream("text/plain");
   if (relayId >= 0 && relayId < 10) {
     resp->setCode(200);
-    resp->print(getSwitchState(relayId) == On ? "ON" : "OFF");
+    resp->print(getSwitchState(relayId) == SwitchState::On ? "ON" : "OFF");
   }
   else {
     resp->setCode(400);
@@ -518,7 +518,7 @@ void setup() {
     f.readBytes(b, SWITCH_RELAY_COUNT);
 
     for (uint8_t i = 0; i < SWITCH_RELAY_COUNT; i++) {
-      setSwitchState(i, b[i] == '1' ? On : Off, false);
+      setSwitchState(i, b[i] == '1' ? SwitchState::On : SwitchState::Off, false);
     }
 
     f.close();

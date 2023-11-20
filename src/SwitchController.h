@@ -21,8 +21,8 @@
 #define SWITCH_STATE_FILENAME         "/state.bin"
 
 void setupSwitchControl(PubSub *pubSubClient);
-SwitchState_t getSwitchState(uint8_t switchId);
-void setSwitchState(uint8_t switchId, SwitchState_t newSwitchState, bool saveState = true);
+SwitchState getSwitchState(uint8_t switchId);
+void setSwitchState(uint8_t switchId, SwitchState newSwitchState, bool saveState = true);
 bool publishSwitchControlState();
 void drawSwitchControlLcd(Print *out);
 
