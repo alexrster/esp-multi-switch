@@ -67,6 +67,7 @@ unsigned long
   lastBlindsRead = 0,
   lastOtaHandle = 0,
   otaUpdateStart = 0,
+  loadedConfigTime = 0,
   runCounter = 0;
 
 bool 
@@ -325,6 +326,16 @@ void onHttpGetRelayState(AsyncWebServerRequest *req, uint8_t relayId) {
   req->send(resp);
 }
 
+__inline void load_config_from_json(JsonDocument &jdoc) {
+  Config.backlight = jdoc["backlight"];
+  Config.backlightTimeout = jdoc["backlightTimeout"];
+  Config.motion = jdoc["motion"];
+  Config.wifi_reconnect_ms = jdoc["wifi_reconnect_ms"] > 0 ? jdoc["wifi_reconnect_ms"] : WIFI_RECONNECT_MILLIS;
+  Config.wifi_watchdog_ms = jdoc["wifi_watchdog_ms"] > 0 ? jdoc["wifi_watchdog_ms"] : WIFI_WATCHDOG_MILLIS;
+  Config.daylight_offset_sec = jdoc["daylight_offset_sec"];
+  Config.wdt_timeout_sec = jdoc["wdt_timeout_sec"] > 0 ? jdoc["wdt_timeout_sec"] : WDT_TIMEOUT_SEC;
+}
+
 std::function<void(AsyncWebServerRequest*)> onHttpGetRelayStateFactory(uint8_t relayId) {
   return ([relayId](AsyncWebServerRequest* req) { return onHttpGetRelayState(req, relayId); });
 }
@@ -385,10 +396,22 @@ void onPubSubCurrentMeeting(uint8_t *payload, unsigned int length) {
 }
 
 void onPubSubBacklight(uint8_t *payload, unsigned int length) { 
-    setLcdBacklight(parseBooleanMessage(payload, length));
+  setLcdBacklight(parseBooleanMessage(payload, length));
 }
 
 void onPubSubConfig(uint8_t *payload, unsigned int length) {
+  StaticJsonDocument<1024> jdoc;
+  DeserializationError error = deserializeJson(jdoc, payload, length);
+    
+  if (!error) {
+    load_config_from_json(jdoc);
+    loadedConfigTime = millis();
+
+    pubsub.publish(MQTT_CLIENT_ID "/config/source", "MQTT");
+  }
+}
+
+void onPubSubConfigUpdated(uint8_t *payload, unsigned int length) {
   if (spiffsEnabled && length > 0) {
     auto f = SPIFFS.open("/config.json", "w");
     f.write(payload, length);
@@ -484,7 +507,8 @@ void setup_pubsub() {
   pubsub.subscribe(MQTT_RESTART_CONTROL_TOPIC, MQTTQOS0, onPubSubRestart);
   pubsub.subscribe(MQTT_CURRENT_MEETING_TOPIC, MQTTQOS0, onPubSubCurrentMeeting);
   pubsub.subscribe(MQTT_BACKLIGHT_TOPIC, MQTTQOS0, onPubSubBacklight);
-  pubsub.subscribe(MQTT_CONFIG_TOPIC "/set", MQTTQOS0, onPubSubConfig);
+  pubsub.subscribe(MQTT_CONFIG_TOPIC "/set", MQTTQOS0, onPubSubConfigUpdated);
+  pubsub.subscribe(MQTT_CONFIG_TOPIC, MQTTQOS0, onPubSubConfig);
 
   // pubsub.subscribe("loc/hall/motion", MQTTQOS0, onPubSubEntranceMotion);
   // pubsub.subscribe("entrance/motion", MQTTQOS0, onPubSubHallMotion);
@@ -494,6 +518,21 @@ void setup_pubsub() {
   // pubsub.subscribe("dev/power-line/current", MQTTQOS0, onPubSubPowerLineCurrent);
   pubsub.subscribe("dev/power-line/battery/percent", MQTTQOS0, onPubSubBatteryPercentInt);
   pubsub.subscribe(MQTT_CLIENT_ID "/txt/power", MQTTQOS0, onPubSubCurrentPowerText);
+}
+
+void load_state_from_spiffs() {
+  if (spiffsEnabled && SPIFFS.exists("/config.json")) {
+    auto f = SPIFFS.open("/config.json");
+    StaticJsonDocument<1024> jdoc;
+    DeserializationError error = deserializeJson(jdoc, f);
+
+    if (!error) {
+      load_config_from_json(jdoc);
+      pubsub.publish(MQTT_CLIENT_ID "/config/source", "SPIFFS");
+    }
+
+    f.close();
+  }
 }
 
 void setup() {
@@ -512,6 +551,14 @@ void setup() {
     spiffsEnabled = false;
   }
 
+  if (spiffsEnabled && SPIFFS.exists(SW_RESET_REASON_FILENAME)) {
+    auto f = SPIFFS.open(SW_RESET_REASON_FILENAME);
+    sw_reset_reason = f.read();
+    f.close();
+
+    SPIFFS.remove(SW_RESET_REASON_FILENAME);
+  }
+
   if (spiffsEnabled && SPIFFS.exists("/state.bin")) {
     char b[SWITCH_RELAY_COUNT];
     auto f = SPIFFS.open("/state.bin");
@@ -522,32 +569,6 @@ void setup() {
     }
 
     f.close();
-  }
-  
-  if (spiffsEnabled && SPIFFS.exists("/config.json")) {
-    auto f = SPIFFS.open("/config.json");
-    StaticJsonDocument<1024> jdoc;
-    DeserializationError error = deserializeJson(jdoc, f);
-
-    if (!error) {
-      Config.backlight = jdoc["backlight"];
-      Config.backlightTimeout = jdoc["backlightTimeout"];
-      Config.motion = jdoc["motion"];
-      Config.wifi_reconnect_ms = jdoc["wifi_reconnect_ms"] > 0 ? jdoc["wifi_reconnect_ms"] : WIFI_RECONNECT_MILLIS;
-      Config.wifi_watchdog_ms = jdoc["wifi_watchdog_ms"] > 0 ? jdoc["wifi_watchdog_ms"] : WIFI_WATCHDOG_MILLIS;
-      Config.daylight_offset_sec = jdoc["daylight_offset_sec"];
-      Config.wdt_timeout_sec = jdoc["wdt_timeout_sec"] > 0 ? jdoc["wdt_timeout_sec"] : WDT_TIMEOUT_SEC;
-    }
-
-    f.close();
-  }
-
-  if (spiffsEnabled && SPIFFS.exists(SW_RESET_REASON_FILENAME)) {
-    auto f = SPIFFS.open(SW_RESET_REASON_FILENAME);
-    sw_reset_reason = f.read();
-    f.close();
-
-    SPIFFS.remove(SW_RESET_REASON_FILENAME);
   }
 
   // Disable brownout detector
@@ -619,18 +640,18 @@ bool onJustStarted() {
     result &= pubsub.publish(MQTT_CLIENT_ID "/restart_reason/sw", get_sw_reset_reason_info(sw_reset_reason).c_str(), true);
     result &= pubsub.publish(MQTT_CLIENT_ID "/restart_reason/run_id", String(runCounter-1).c_str(), true);
 
-    String buf;
-    DynamicJsonDocument jdoc(256);
-    jdoc["backlight"] = Config.backlight;
-    jdoc["backlightTimeout"] = Config.backlightTimeout;
-    jdoc["motion"] = Config.motion;
-    jdoc["wifi_reconnect_ms"] = Config.wifi_reconnect_ms;
-    jdoc["wifi_watchdog_ms"] = Config.wifi_watchdog_ms;
-    jdoc["daylight_offset_sec"] = Config.daylight_offset_sec;
-    jdoc["wdt_timeout_sec"] = Config.wdt_timeout_sec;
+    // String buf;
+    // DynamicJsonDocument jdoc(256);
+    // jdoc["backlight"] = Config.backlight;
+    // jdoc["backlightTimeout"] = Config.backlightTimeout;
+    // jdoc["motion"] = Config.motion;
+    // jdoc["wifi_reconnect_ms"] = Config.wifi_reconnect_ms;
+    // jdoc["wifi_watchdog_ms"] = Config.wifi_watchdog_ms;
+    // jdoc["daylight_offset_sec"] = Config.daylight_offset_sec;
+    // jdoc["wdt_timeout_sec"] = Config.wdt_timeout_sec;
     
-    serializeJson(jdoc, buf);
-    result &= pubsub.publish(MQTT_CONFIG_TOPIC, buf.c_str(), true);
+    // serializeJson(jdoc, buf);
+    // result &= pubsub.publish(MQTT_CONFIG_TOPIC, buf.c_str(), true);
 
     return result;
 }
@@ -788,6 +809,16 @@ void loop() {
 
   if (justStarted) {
     justStarted = !onJustStarted();
+  }
+
+  if (loadedConfigTime == 0) {
+    if (now > 5000) {
+      loadedConfigTime = now;
+      load_state_from_spiffs();
+    } else {
+      pubsub_loop(now);
+      return;
+    }
   }
 
   timeconfig_loop(now);
