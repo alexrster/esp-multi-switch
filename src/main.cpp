@@ -26,8 +26,11 @@
 #include <time.h>
 #include "reset_info.h"
 #include "version.h"
-#include <ESPAsyncWebServer.h>
 #include <pubsub.h>
+
+#ifdef FEATURE_HTTP
+#include <ESPAsyncWebServer.h>
+#endif
 
 struct config_t {
   bool motion = true;
@@ -121,7 +124,10 @@ LcdFixedPositionPrint
 LcdFixedPositionVerticalPrint
   splitterDrawerTextDisplay(&lcd, 0, 15);
 
+#ifdef FEATURE_HTTP
 AsyncWebServer webServer(80);
+#endif
+
 Preferences preferences;
 
 void restart(char code) {
@@ -286,6 +292,18 @@ bool getAdjustedTime(tm *t) {
   return true;
 }
 
+__inline void load_config_from_json(JsonDocument &jdoc) {
+  Config.backlight = jdoc["backlight"];
+  Config.backlightTimeout = jdoc["backlightTimeout"];
+  Config.motion = jdoc["motion"];
+  Config.wifi_reconnect_ms = jdoc["wifi_reconnect_ms"] > 0 ? jdoc["wifi_reconnect_ms"] : WIFI_RECONNECT_MILLIS;
+  Config.wifi_watchdog_ms = jdoc["wifi_watchdog_ms"] > 0 ? jdoc["wifi_watchdog_ms"] : WIFI_WATCHDOG_MILLIS;
+  Config.daylight_offset_sec = jdoc["daylight_offset_sec"];
+  Config.wdt_timeout_sec = jdoc["wdt_timeout_sec"] > 0 ? jdoc["wdt_timeout_sec"] : WDT_TIMEOUT_SEC;
+}
+
+#ifdef FEATURE_HTTP
+
 void onHttpSetRelayState(AsyncWebServerRequest *req, uint8_t relayId) {
   AsyncResponseStream *resp = req->beginResponseStream("text/plain");
   auto relayStateStr = req->getParam("set")->value();
@@ -326,16 +344,6 @@ void onHttpGetRelayState(AsyncWebServerRequest *req, uint8_t relayId) {
   req->send(resp);
 }
 
-__inline void load_config_from_json(JsonDocument &jdoc) {
-  Config.backlight = jdoc["backlight"];
-  Config.backlightTimeout = jdoc["backlightTimeout"];
-  Config.motion = jdoc["motion"];
-  Config.wifi_reconnect_ms = jdoc["wifi_reconnect_ms"] > 0 ? jdoc["wifi_reconnect_ms"] : WIFI_RECONNECT_MILLIS;
-  Config.wifi_watchdog_ms = jdoc["wifi_watchdog_ms"] > 0 ? jdoc["wifi_watchdog_ms"] : WIFI_WATCHDOG_MILLIS;
-  Config.daylight_offset_sec = jdoc["daylight_offset_sec"];
-  Config.wdt_timeout_sec = jdoc["wdt_timeout_sec"] > 0 ? jdoc["wdt_timeout_sec"] : WDT_TIMEOUT_SEC;
-}
-
 std::function<void(AsyncWebServerRequest*)> onHttpGetRelayStateFactory(uint8_t relayId) {
   return ([relayId](AsyncWebServerRequest* req) { return onHttpGetRelayState(req, relayId); });
 }
@@ -370,6 +378,12 @@ void setup_http()
 
   webServer.begin();
 }
+
+#else
+
+void setup_http() {}
+
+#endif
 
 void onPubSubRestart(uint8_t *payload, unsigned int length) { 
   restart(RESET_ON_MQTT_RESET_TOPIC);

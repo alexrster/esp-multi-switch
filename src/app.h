@@ -30,7 +30,7 @@
 #define MQTT_QUEUE_MAX_SIZE           100
 
 #ifndef MQTT_CLIENT_ID
-#define MQTT_CLIENT_ID                WIFI_HOSTNAME
+#define MQTT_CLIENT_ID                "dev/esp32/" WIFI_HOSTNAME
 #endif
 
 #define MQTT_STATUS_TOPIC             MQTT_CLIENT_ID "/status"
