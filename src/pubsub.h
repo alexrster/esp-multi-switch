@@ -82,7 +82,7 @@ class PubSub {
       if (now == 0 || now - lastPubSubReconnectAttempt > MQTT_RECONNECT_MILLIS) {
         lastPubSubReconnectAttempt = now;
 
-        if (pubSubClient->connect(MQTT_CLIENT_ID, MQTT_USERNAME, MQTT_PASSWORD, MQTT_STATUS_TOPIC, MQTTQOS0, true, MQTT_STATUS_OFFLINE_MSG, true)) {
+        if (pubSubClient->connect(MQTT_CLIENT_ID, MQTT_USERNAME, MQTT_PASSWORD, MQTT_STATUS_TOPIC, MQTTQOS0, true, MQTT_STATUS_OFFLINE_MSG, true, true)) {
           pubSubClient->publish(MQTT_STATUS_TOPIC, MQTT_STATUS_ONLINE_MSG, true);
 
 #ifdef VERSION
